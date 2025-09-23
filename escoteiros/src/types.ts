@@ -17,9 +17,12 @@ export type Member = {
   is_youth: boolean // legado; não usamos mais na UI
 }
 
+export type ActivityKind = 'interna' | 'externa' | 'acampamento'
+
 export type Activity = {
   id: string
   title: string
-  date: string
+  date: string             // 'YYYY-MM-DD'
   created_by: string | null
+  kind: ActivityKind       // NOVO
 }
