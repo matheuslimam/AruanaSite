@@ -24,11 +24,21 @@ const KIND_FILTER_OPTS: { label: string; value: 'all' | ActivityKind }[] = [
   ...KIND_OPTS
 ]
 
-const slug = (s: string) =>
-  s.toLowerCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
+/* ---- tema por seção e ícones por tipo ---- */
+const SECTION_THEME: Record<PatrolCategory, { ring: string; pill: string; text: string; light: string }> = {
+  lobinhos:   { ring: 'ring-emerald-300',  pill: 'bg-emerald-100 text-emerald-700', text: 'text-emerald-900', light: 'from-emerald-50 to-emerald-100' },
+  escoteiros: { ring: 'ring-sky-300',      pill: 'bg-sky-100 text-sky-700',         text: 'text-sky-900',     light: 'from-sky-50 to-sky-100' },
+  seniors:    { ring: 'ring-violet-300',   pill: 'bg-violet-100 text-violet-700',   text: 'text-violet-900',  light: 'from-violet-50 to-violet-100' },
+}
+const KIND_ICON: Record<ActivityKind, string> = {
+  interna: '🏠',
+  externa: '🚶',
+  acampamento: '🏕️',
+}
 
+const slug = (s: string) =>
+  s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '')
 function escapeRegExp(s: string){ return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 const eq = (a:any,b:any)=> JSON.stringify(a)===JSON.stringify(b)
 
@@ -99,21 +109,18 @@ export default function Atividades(){
       const bToday = (b.date || '') === t
       if (aToday && !bToday) return -1
       if (!aToday && bToday) return 1
-      // ambos hoje ou nenhum hoje => ordena por data desc
       const cmp = (b.date||'').localeCompare(a.date||'')
       if (cmp !== 0) return cmp
-      // desempate opcional pelo título
       return (a.title||'').localeCompare(b.title||'')
     })
   }
 
   function formatBR(dateStr?: string | null) {
-  if (!dateStr) return '—'
-  const [y, m, d] = dateStr.split('-')
-  if (!y || !m || !d) return dateStr
-  return `${d}/${m}/${y}`
-}
-
+    if (!dateStr) return '—'
+    const [y, m, d] = dateStr.split('-')
+    if (!y || !m || !d) return dateStr
+    return `${d}/${m}/${y}`
+  }
 
   useEffect(()=>{ (async()=>{
     const { data: acts } = await supabase
@@ -329,7 +336,6 @@ export default function Atividades(){
       alert('Chamada e pontos salvos!')
     } finally { setSaving(false) }
   }
-
   async function atualizarSomenteMudancas(){
     if(!selected) return
     setUpdating(true)
@@ -448,7 +454,11 @@ export default function Atividades(){
 
   function KindBadge({k}:{k:ActivityKind}){
     const label = KIND_OPTS.find(o=>o.value===k)?.label ?? k
-    return <span className="text-[11px] px-2 py-0.5 rounded-full border">{label}</span>
+    return (
+      <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border bg-white">
+        <span className="text-xs">{KIND_ICON[k]}</span>{label}
+      </span>
+    )
   }
   function TodayBadge(){
     return <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 border border-green-300">Atividade de hoje</span>
@@ -460,99 +470,122 @@ export default function Atividades(){
     return activities.filter(a => (a.kind ?? 'interna') === filterKind)
   }, [activities, filterKind])
 
+  /* ======================= RENDER ======================= */
+  const selectedIsToday = selected && isToday(selected.date)
+
   return (
-    <div className="grid md:grid-cols-2 gap-8">
+    <div className="grid lg:grid-cols-[420px,1fr] gap-8">
       {/* Coluna esquerda: lista + criar + filtros de tipo */}
       <div>
-        <h1 className="text-2xl font-bold mb-2">Atividades</h1>
+        <div className="sticky top-16 z-10 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-2 pb-3">
+          <h1 className="text-2xl font-bold">Atividades</h1>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <input className="border rounded-lg px-3 py-2 flex-1 min-w-[140px]" placeholder="Título da atividade" value={title} onChange={e=>setTitle(e.target.value)} />
+            <input type="date" className="border rounded-lg px-3 py-2" value={date} onChange={e=>setDate(e.target.value)} />
+            <select className="border rounded-lg px-3 py-2" value={kind} onChange={e=>setKind(e.target.value as ActivityKind)}>
+              {KIND_OPTS.map(k=> <option key={k.value} value={k.value}>{k.label}</option>)}
+            </select>
+            <button onClick={createActivity} className="px-4 py-2 rounded-lg bg-black text-white hover:opacity-90">Criar</button>
+          </div>
 
-        <div className="flex flex-wrap gap-2">
-          <input className="border rounded p-2 flex-1" placeholder="Título da atividade" value={title} onChange={e=>setTitle(e.target.value)} />
-          <input type="date" className="border rounded p-2" value={date} onChange={e=>setDate(e.target.value)} />
-          <select className="border rounded p-2" value={kind} onChange={e=>setKind(e.target.value as ActivityKind)}>
-            {KIND_OPTS.map(k=> <option key={k.value} value={k.value}>{k.label}</option>)}
-          </select>
-          <button onClick={createActivity} className="px-3 py-2 rounded bg-black text-white">Criar</button>
+          {/* Filtro por TIPO */}
+          <div className="mt-3">
+            <div className="text-sm mb-1">Filtrar por tipo:</div>
+            <ChipGroup
+              options={KIND_FILTER_OPTS as any}
+              value={filterKind as any}
+              onChange={(v)=>setFilterKind(v as any)}
+              theme="light"
+            />
+          </div>
         </div>
 
-        {/* Filtro por TIPO */}
-        <div className="mt-3">
-          <div className="text-sm mb-1">Filtrar por tipo:</div>
-          <ChipGroup
-            options={KIND_FILTER_OPTS as any}
-            value={filterKind as any}
-            onChange={(v)=>setFilterKind(v as any)}
-            theme="light"
-          />
-        </div>
-
-        <ul className="mt-4 border rounded divide-y">
-          {visibleActivities.map(a=> (
-            <li
-              key={a.id}
-              className={`p-3 cursor-pointer ${selected?.id===a.id?'bg-gray-50':''}`}
-              onClick={()=> setSelected(a)}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="space-y-0.5">
-                  <div className="font-medium flex items-center flex-wrap gap-2">
-                    {a.title}
-                    <KindBadge k={a.kind ?? 'interna'} />
-                    {isToday(a.date) && <TodayBadge />}
+        {/* Lista de atividades */}
+        <ul className="mt-4 grid gap-3">
+          {visibleActivities.map(a=> {
+            const today = isToday(a.date)
+            return (
+              <li
+                key={a.id}
+                className={`rounded-xl border p-3 cursor-pointer transition hover:shadow-sm ${selected?.id===a.id?'bg-slate-50 ring-1 ring-slate-200':''}`}
+                onClick={()=> setSelected(a)}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-medium flex items-center flex-wrap gap-2">
+                      <span className="truncate">{a.title}</span>
+                      <KindBadge k={a.kind ?? 'interna'} />
+                      {today && <TodayBadge />}
+                    </div>
+                    <div className="mt-0.5 text-xs text-gray-500">{formatBR(a.date)}</div>
                   </div>
-                  <div className="text-xs text-gray-500">{formatBR(a.date)}</div>
+                  <button
+                    onClick={(e)=>{ e.stopPropagation(); deleteActivity(a) }}
+                    disabled={deletingId === a.id}
+                    className={`px-2 py-1 rounded-lg border text-sm hover:bg-gray-50 ${deletingId===a.id ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    title="Excluir atividade"
+                  >
+                    {deletingId === a.id ? 'Excluindo…' : 'Excluir'}
+                  </button>
                 </div>
-                <button
-                  onClick={(e)=>{ e.stopPropagation(); deleteActivity(a) }}
-                  disabled={deletingId === a.id}
-                  className={`px-2 py-1 rounded border text-sm ${deletingId===a.id ? 'opacity-60 cursor-not-allowed' : ''}`}
-                  title="Excluir atividade"
-                >
-                  {deletingId === a.id ? 'Excluindo…' : 'Excluir'}
-                </button>
-              </div>
+              </li>
+            )
+          })}
+          {visibleActivities.length === 0 && (
+            <li className="rounded-xl border p-6 text-sm text-gray-500 text-center">
+              Nenhuma atividade. Crie a primeira acima.
             </li>
-          ))}
+          )}
         </ul>
       </div>
 
       {/* Coluna direita: edição meta + chamada/pontos */}
-      <div>
-        <h2 className="text-xl font-semibold mb-2">
-          Chamada & Pontos {selected?`— ${selected.title}`:''}
-          {selected && isToday(selected.date) && <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-green-100 border border-green-300">Atividade de hoje</span>}
-          {loadingHydrate && <span className="ml-2 text-xs text-gray-500">(carregando...)</span>}
-        </h2>
+      <div className="space-y-5">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold">
+            Chamada & Pontos {selected?`— ${selected.title}`:''}
+          </h2>
+          {selected && (
+            <div className="text-xs text-gray-500">
+              {selectedIsToday && <span className="px-2 py-0.5 rounded-full bg-green-100 border border-green-300 mr-2">Hoje</span>}
+              Presenças: <span className="font-semibold">{presentCount}</span>
+            </div>
+          )}
+        </div>
 
-        {!selected && <div className="text-sm text-gray-500">Crie ou selecione uma atividade para abrir a chamada.</div>}
+        {!selected && (
+          <div className="rounded-2xl border p-6 text-sm text-gray-600">
+            Crie ou selecione uma atividade para abrir a chamada.
+          </div>
+        )}
 
         {selected && (
-          <div className="space-y-5">
+          <>
             {/* METADADOS */}
-            <div className="border rounded p-3">
+            <div className={`rounded-2xl border p-3 ring-1 ring-inset ${selectedIsToday ? 'ring-emerald-200' : 'ring-slate-200'}`}>
               <div className="flex items-center justify-between">
                 <div className="font-medium">Detalhes da atividade</div>
                 {!isEditingMeta ? (
-                  <button onClick={startEditMeta} className="px-2 py-1 rounded border text-sm">Editar</button>
+                  <button onClick={startEditMeta} className="px-2 py-1 rounded-lg border text-sm hover:bg-gray-50">Editar</button>
                 ) : (
                   <div className="flex gap-2">
-                    <button onClick={saveEditMeta} className="px-2 py-1 rounded bg-black text-white text-sm">Salvar</button>
-                    <button onClick={cancelEditMeta} className="px-2 py-1 rounded border text-sm">Cancelar</button>
+                    <button onClick={saveEditMeta} className="px-2 py-1 rounded-lg bg-black text-white text-sm">Salvar</button>
+                    <button onClick={cancelEditMeta} className="px-2 py-1 rounded-lg border text-sm">Cancelar</button>
                   </div>
                 )}
               </div>
 
               {!isEditingMeta ? (
                 <div className="mt-3 grid sm:grid-cols-3 gap-3 text-sm">
-                  <div><div className="text-gray-500">Título</div><div className="font-medium">{selected.title}</div></div>
-                  <div><div className="text-gray-500">Data</div><div className="font-medium">{formatBR(selected.date)}</div></div>
-                  <div><div className="text-gray-500">Tipo</div><div className="font-medium">{KIND_OPTS.find(o=>o.value===selected.kind)?.label ?? '—'}</div></div>
+                  <InfoItem label="Título" value={selected.title} />
+                  <InfoItem label="Data" value={formatBR(selected.date)} />
+                  <InfoItem label="Tipo" value={KIND_OPTS.find(o=>o.value===selected.kind)?.label ?? '—'} />
                 </div>
               ) : (
                 <div className="mt-3 grid sm:grid-cols-3 gap-3">
-                  <input className="border rounded p-2" value={editTitle} onChange={e=>setEditTitle(e.target.value)} placeholder="Título" />
-                  <input type="date" className="border rounded p-2" value={editDate} onChange={e=>setEditDate(e.target.value)} />
-                  <select className="border rounded p-2" value={editKind} onChange={e=>setEditKind(e.target.value as ActivityKind)}>
+                  <input className="border rounded-lg px-3 py-2" value={editTitle} onChange={e=>setEditTitle(e.target.value)} placeholder="Título" />
+                  <input type="date" className="border rounded-lg px-3 py-2" value={editDate} onChange={e=>setEditDate(e.target.value)} />
+                  <select className="border rounded-lg px-3 py-2" value={editKind} onChange={e=>setEditKind(e.target.value as ActivityKind)}>
                     {KIND_OPTS.map(k=> <option key={k.value} value={k.value}>{k.label}</option>)}
                   </select>
                 </div>
@@ -574,68 +607,167 @@ export default function Atividades(){
                 <span className="text-sm">Pontos base geral</span>
                 <input
                   type="number"
-                  className="w-20 border rounded p-1"
+                  className="w-24 border rounded-lg px-2 py-1"
                   value={basePoints}
                   onChange={e=>setBasePoints(parseInt(e.target.value||'0'))}
                 />
               </div>
             </div>
 
-            {/* chamada + extras */}
-            <div className="border rounded max-h-[460px] overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-white border-b">
-                  <tr className="text-left">
-                    <th className="p-2">Pres.</th>
-                    <th>Nome</th>
-                    <th>Patrulha</th>
-                    {extraDefs.map(d=>(
-                      <th key={d.key} className="text-center">{d.label}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMembers.map(m=>{
-                    const checked = !!present[m.id]
-                    const rowSel = extrasSelected[m.id] || {}
-                    return (
-                      <tr key={m.id} className="border-b">
-                        <td className="p-2">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={e=>setPresent(prev=>({...prev, [m.id]: e.target.checked}))}
-                          />
-                        </td>
-                        <td>{m.display_name}</td>
-                        <td>{patrolName(m.patrol_id)}</td>
-                        {extraDefs.map(d=>(
-                          <td key={d.key} className="text-center">
-                            <input
-                              type="checkbox"
-                              checked={!!rowSel[d.key]}
-                              onChange={e=>toggleExtra(m.id, d.key, e.target.checked)}
-                            />
-                          </td>
-                        ))}
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
+          {/* chamada + extras (responsivo) */}
+<div className="rounded-2xl border overflow-hidden">
+  <div className="bg-gradient-to-r from-slate-50 to-white px-3 py-2 text-xs text-slate-600 border-b">
+    Marque presença e extras (cada extra vale o “ponto base”).
+    {loadingHydrate && <span className="ml-2 italic text-slate-400">(carregando…)</span>}
+  </div>
+
+  {/* --- MOBILE (até md) → cards --- */}
+  <div className="md:hidden divide-y">
+    {filteredMembers.map((m, idx) => {
+      const checked = !!present[m.id]
+      const rowSel  = extrasSelected[m.id] || {}
+      const cat     = memberSection(m)
+      return (
+        <div key={m.id} className="p-3">
+          <div className="flex items-start justify-between gap-3">
+            {/* Presença “grande” no mobile */}
+            <label className="inline-flex items-center gap-2 select-none">
+              <input
+                type="checkbox"
+                className="h-5 w-5"
+                checked={checked}
+                onChange={e=>setPresent(prev=>({...prev, [m.id]: e.target.checked}))}
+              />
+              <span className="text-sm font-medium">{m.display_name}</span>
+            </label>
+
+            {/* Chip de seção */}
+            <div>
+              {cat && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded ring-1 ring-inset ${
+                  cat==='lobinhos'   ? 'bg-emerald-100 text-emerald-700 ring-emerald-300' :
+                  cat==='escoteiros' ? 'bg-sky-100 text-sky-700 ring-sky-300' :
+                                       'bg-violet-100 text-violet-700 ring-violet-300'
+                }`}>
+                  {cat}
+                </span>
+              )}
             </div>
+          </div>
+
+          {/* Patrulha */}
+          <div className="mt-1 text-xs text-slate-500">
+            Patrulha: <span className="font-medium text-slate-700">{patrolName(m.patrol_id)}</span>
+          </div>
+
+          {/* Extras: grid fluida 2 col (quebra se precisar) */}
+          {extraDefs.length > 0 && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              {extraDefs.map(d => (
+                <label key={d.key} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={!!rowSel[d.key]}
+                    onChange={e=>toggleExtra(m.id, d.key, e.target.checked)}
+                  />
+                  <span className="truncate">{d.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    })}
+    {filteredMembers.length === 0 && (
+      <div className="p-6 text-center text-sm text-gray-500">Nenhum membro na filtragem atual.</div>
+    )}
+  </div>
+
+  {/* --- DESKTOP (md+) → tabela --- */}
+  <div className="hidden md:block max-h-[460px] overflow-auto">
+    <table className="w-full text-sm">
+      <thead className="sticky top-0 bg-white border-b">
+        <tr className="text-left">
+          <th className="p-2 w-14">Pres.</th>
+          <th className="py-2">Nome</th>
+          <th className="py-2">Patrulha</th>
+          {extraDefs.map(d=>(
+            <th key={d.key} className="py-2 text-center">{d.label}</th>
+          ))}
+        </tr>
+      </thead>
+      <tbody>
+        {filteredMembers.map((m, idx)=>{
+          const checked = !!present[m.id]
+          const rowSel  = extrasSelected[m.id] || {}
+          const cat     = memberSection(m)
+          const stripe  = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'
+          const ring    = cat==='lobinhos'   ? 'ring-emerald-200' :
+                          cat==='escoteiros' ? 'ring-sky-200'     :
+                          cat==='seniors'    ? 'ring-violet-200'  : 'ring-slate-200'
+          return (
+            <tr key={m.id} className={`${stripe} border-b`}>
+              <td className="p-2">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={checked}
+                  onChange={e=>setPresent(prev=>({...prev, [m.id]: e.target.checked}))}
+                />
+              </td>
+              <td className="py-2">
+                <div className={`inline-flex items-center gap-2 px-2 py-0.5 rounded-lg ring-1 ring-inset ${ring}`}>
+                  <span className="font-medium">{m.display_name}</span>
+                  {cat && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                      cat==='lobinhos'   ? 'bg-emerald-100 text-emerald-700' :
+                      cat==='escoteiros' ? 'bg-sky-100 text-sky-700' :
+                                           'bg-violet-100 text-violet-700'
+                    }`}>
+                      {cat}
+                    </span>
+                  )}
+                </div>
+              </td>
+              <td className="py-2">{patrolName(m.patrol_id)}</td>
+              {extraDefs.map(d=>(
+                <td key={d.key} className="py-2 text-center">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4"
+                    checked={!!rowSel[d.key]}
+                    onChange={e=>toggleExtra(m.id, d.key, e.target.checked)}
+                  />
+                </td>
+              ))}
+            </tr>
+          )
+        })}
+        {filteredMembers.length === 0 && (
+          <tr>
+            <td colSpan={3 + extraDefs.length} className="py-8 text-center text-gray-500">
+              Nenhum membro na filtragem atual.
+            </td>
+          </tr>
+        )}
+      </tbody>
+    </table>
+  </div>
+</div>
+
 
             {/* adicionar novo parâmetro */}
-            <div className="border rounded p-3">
+            <div className="rounded-2xl border p-3">
               <div className="text-sm font-medium mb-2">Adicionar parâmetro de pontuação (extra)</div>
               <div className="flex flex-wrap items-end gap-2">
                 <input
-                  className="border rounded p-2 flex-1 min-w-[200px]"
+                  className="border rounded-lg px-3 py-2 flex-1 min-w-[200px]"
                   placeholder="Ex.: Pontualidade"
                   value={newParamLabel}
                   onChange={e=>setNewParamLabel(e.target.value)}
                 />
-                <button onClick={addParam} className="px-3 py-2 rounded bg-black text-white">Adicionar</button>
+                <button onClick={addParam} className="px-3 py-2 rounded-lg bg-black text-white hover:opacity-90">Adicionar</button>
               </div>
               <div className="text-xs text-gray-500 mt-1">
                 * Cada extra marcado vale os “Pontos base geral”.
@@ -643,23 +775,23 @@ export default function Atividades(){
             </div>
 
             {/* bônus por patrulha — agrupado por seção */}
-            <div className="border rounded p-3 space-y-3">
+            <div className="rounded-2xl border p-3 space-y-5">
               <div className="font-medium">Bônus por Patrulha</div>
 
               {(['lobinhos','escoteiros','seniors'] as PatrolCategory[]).map(cat => (
                 <div key={cat} className="space-y-2">
-                  <div className="text-sm font-semibold">
+                  <div className={`text-sm font-semibold`}>
                     {{lobinhos:'Lobinhos',escoteiros:'Escoteiros',seniors:'Seniors'}[cat]}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <div className="grid md:grid-cols-2 gap-2">
                     {patrolsByCat[cat].length === 0 ? (
                       <div className="text-sm text-gray-500">Sem patrulhas nesta seção.</div>
                     ) : patrolsByCat[cat].map(p => (
-                      <div key={p.id} className="flex items-center gap-2">
-                        <span className="min-w-[140px]">{p.name}</span>
+                      <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 bg-white">
+                        <span className="font-medium">{p.name}</span>
                         <input
                           type="number"
-                          className="w-24 border rounded p-2"
+                          className="w-24 border rounded-lg px-2 py-1"
                           value={bonusByPatrol[p.id] ?? 0}
                           onChange={e=>setBonusByPatrol(prev=>({ ...prev, [p.id]: parseInt(e.target.value||'0') }))}
                           placeholder="Pontos"
@@ -669,28 +801,43 @@ export default function Atividades(){
                   </div>
                 </div>
               ))}
+            </div>
 
-              <div className="flex gap-2 pt-2">
+            {/* Barra de ações fixa */}
+            <div className="sticky bottom-4">
+              <div className="rounded-2xl border bg-white/90 backdrop-blur px-3 py-2 flex items-center gap-2 shadow-sm">
                 <button
                   onClick={salvarChamadaEPontos}
                   disabled={saving}
-                  className={`px-3 py-2 rounded text-white ${saving ? 'bg-gray-600' : 'bg-black'}`}
+                  className={`px-3 py-2 rounded-lg text-white ${saving ? 'bg-gray-600' : 'bg-black hover:opacity-90'}`}
                 >
                   {saving ? 'Salvando...' : 'Salvar (regravar tudo)'}
                 </button>
                 <button
                   onClick={atualizarSomenteMudancas}
                   disabled={updating}
-                  className="px-3 py-2 rounded border"
+                  className="px-3 py-2 rounded-lg border bg-white hover:bg-gray-50"
                 >
                   {updating ? 'Atualizando...' : 'Atualizar (somente mudanças)'}
                 </button>
+                <div className="ml-auto text-xs text-slate-500">
+                  Presenças <span className="font-semibold">{presentCount}</span>
+                </div>
               </div>
             </div>
-
-          </div>
+          </>
         )}
       </div>
+    </div>
+  )
+}
+
+/* ---- componentes auxiliares ---- */
+function InfoItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-gray-500">{label}</div>
+      <div className="font-medium">{value}</div>
     </div>
   )
 }
