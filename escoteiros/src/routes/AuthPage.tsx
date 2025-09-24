@@ -10,12 +10,28 @@ export default function AuthPage() {
   const navigate = useNavigate()
   const { session } = useSession()
 
-  // Evita navegar no meio do render
+  async function goHomeByRole() {
+    const { data: u } = await supabase.auth.getUser()
+    if (!u.user) return
+    const { data: prof } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('user_id', u.user.id)
+      .maybeSingle()
+
+    const role = (prof as any)?.role
+    if (role === 'chefe' || role === 'pioneiros') {
+      navigate('/app/atividades', { replace: true })
+    } else {
+      navigate('/app/meu', { replace: true })
+    }
+  }
+
   useEffect(() => {
     if (session) {
-      navigate('/app/atividades', { replace: true })
+      goHomeByRole()
     }
-  }, [session, navigate])
+  }, [session])
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -25,18 +41,16 @@ export default function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
       } else {
-        // no seu AuthPage, no signUp:
         const { error } = await supabase.auth.signUp({
           email,
           password,
           options: {
             emailRedirectTo: `${window.location.origin}/auth`
           }
-        });
-
+        })
         if (error) throw error
       }
-      navigate('/app/atividades', { replace: true })
+      await goHomeByRole()
     } catch (err: any) {
       alert(err.message)
     } finally {
@@ -47,7 +61,6 @@ export default function AuthPage() {
   return (
     <div className="min-h-screen grid place-items-center p-6">
       <div className="w-full max-w-sm">
-        {/* Link para a landing */}
         <div className="mb-3">
           <Link
             to="/"
@@ -81,10 +94,7 @@ export default function AuthPage() {
             required
           />
 
-          <button
-            disabled={loading}
-            className="w-full rounded bg-black text-white py-2"
-          >
+          <button disabled={loading} className="w-full rounded bg-black text-white py-2">
             {loading ? '...' : (mode === 'login' ? 'Entrar' : 'Cadastrar')}
           </button>
 
@@ -96,7 +106,6 @@ export default function AuthPage() {
             {mode === 'login' ? 'Criar uma conta' : 'Já tenho conta'}
           </button>
 
-          {/* Link extra no rodapé do card (opcional) */}
           <div className="pt-2 text-center">
             <Link to="/" className="text-xs text-gray-500 hover:text-gray-800">
               Ir para a página inicial

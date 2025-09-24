@@ -8,7 +8,9 @@ import AppLayout from './routes/AppLayout'
 import Atividades from './routes/Atividades'
 import Membros from './routes/Membros'
 import Patrulhas from './routes/Patrulhas'
+import MeuPainel from './pages/MeuPainel'
 import { SessionProvider } from './supabase'
+import { RequireRole } from './guards'
 
 const router = createBrowserRouter([
   { path: '/', element: <Landing /> },
@@ -16,9 +18,40 @@ const router = createBrowserRouter([
   {
     path: '/app', element: <AppLayout />,
     children: [
-      { path: 'atividades', element: <Atividades /> },
-      { path: 'membros', element: <Membros /> },
-      { path: 'patrulhas', element: <Patrulhas /> },
+      // comum: só lobinhos/escoteiros/seniors
+      {
+        path: 'meu',
+        element: (
+          <RequireRole allow={['lobinhos','escoteiros','seniors']} to="/app/atividades">
+            <MeuPainel />
+          </RequireRole>
+        )
+      },
+      // admin-view: chefes + pioneiros
+      {
+        path: 'atividades',
+        element: (
+          <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
+            <Atividades />
+          </RequireRole>
+        )
+      },
+      {
+        path: 'membros',
+        element: (
+          <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
+            <Membros />
+          </RequireRole>
+        )
+      },
+      {
+        path: 'patrulhas',
+        element: (
+          <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
+            <Patrulhas />
+          </RequireRole>
+        )
+      },
     ]
   }
 ])

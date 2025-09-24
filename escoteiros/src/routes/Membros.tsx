@@ -200,22 +200,42 @@ export default function Membros(){
     setEditRole('escoteiros')
   }
 
-  async function removeMember(id: string){
-    if(!confirm('Tem certeza que deseja excluir este membro?')) return
-    setDeletingId(id)
-    try{
-      const { error } = await supabase.from('profiles').delete().eq('id', id)
-      if(error){ alert(error.message); return }
-      setMembers(prev => prev.filter(m => m.id !== id))
-      setAttendanceCountByMember(prev => {
-        const n = { ...prev }
-        delete n[id]
-        return n
-      })
-    } finally {
-      setDeletingId(null)
+  async function removeMember(id: string) {
+  if (!confirm('Tem certeza que deseja excluir este membro? Isso também apagará o usuário do Auth.')) return
+  setDeletingId(id)
+  try {
+    const { data: sess } = await supabase.auth.getSession()
+    const token = sess.session?.access_token ?? ''
+
+    const { data, error } = await supabase.functions.invoke('delete-member', {
+      body: {
+        profile_id: id,
+        delete_attendance: true, // opcional
+        delete_auth: true        // opcional
+      },
+      headers: { Authorization: `Bearer ${token}` }
+    })
+
+    if (error) {
+      const res = (error as any).context?.response
+      try {
+        const text = res ? await res.text() : ''
+        let msg = text
+        try { msg = JSON.parse(text)?.error ?? text } catch {}
+        alert(`Erro ${res?.status ?? ''}: ${msg || (error as any).message}`)
+        console.error('EDGE ERROR', res?.status, msg)
+      } catch {
+        alert((error as any).message || 'Erro na Edge')
+      }
+      return
     }
+
+    await load()
+  } finally {
+    setDeletingId(null)
   }
+}
+
 
   // spinner
   const Spinner = () => (
