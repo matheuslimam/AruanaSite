@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import type { Member, Patrol, MemberRole } from '../types'
-import { Chip, ChipGroup } from '../components/Chip'
-
+import { ChipGroup } from '../components/Chip'
 
 type Row = Member
 type ViewMode = 'table' | 'general'
@@ -108,12 +107,22 @@ export default function Membros(){
       patrol_id: newPatrolId || null,
       role: newRole,
       send_invite: sendInvite,
+      redirect_to: `${window.location.origin}/auth/callback`, // rota de callback (recomendado)
     }
 
     setAdding(true)
     try{
-      const { data, error } = await supabase.functions.invoke('invite-member', { body: payload })
+      // pega o token atual (do chefe logado)
+      const { data: sess } = await supabase.auth.getSession()
+      const token = sess.session?.access_token ?? ''
+
+      const { data, error } = await supabase.functions.invoke('invite-member', {
+        body: payload,
+        headers: { Authorization: `Bearer ${token}` },
+      })
+
       if (error) {
+        // extrai mensagem da Edge
         const res = (error as any).context?.response
         try {
           const text = res ? await res.text() : ''
@@ -127,6 +136,7 @@ export default function Membros(){
         return
       }
 
+      // sucesso
       await load()
       setNewName('')
       setNewEmail('')
@@ -136,10 +146,18 @@ export default function Membros(){
 
       const link = (data as any)?.accessLink as string | null
       const temp = (data as any)?.tempPassword as string | null
-      if (link && temp) alert(`Membro criado!\nSenha temporária: ${temp}\nLink de acesso: ${link}`)
-      else if (link) alert(`Membro criado! Link de acesso: ${link}`)
-      else if (temp) alert(`Membro criado! Senha temporária: ${temp}`)
-      else alert('Membro criado/vinculado com sucesso.')
+      const note = (data as any)?.note as string | null
+
+      // mensagens de retorno (cobre createUser, magiclink e signup link)
+      if (link && temp) {
+        alert(`Membro criado!\n\nSenha temporária:\n${temp}\n\nLink de acesso/inscrição:\n${link}\n\n${note ?? ''}`)
+      } else if (link) {
+        alert(`Membro criado!\n\nLink de acesso/inscrição:\n${link}\n\n${note ?? ''}`)
+      } else if (temp) {
+        alert(`Membro criado!\n\nSenha temporária:\n${temp}\n\n${note ?? ''}`)
+      } else {
+        alert(`Membro criado/vinculado com sucesso.\n${note ?? ''}`)
+      }
     } finally {
       setAdding(false)
     }
@@ -156,7 +174,7 @@ export default function Membros(){
   async function saveEdit(){
     if(!editingId) return
     const display_name = editName.trim()
-    const email = editEmail.trim().toLowerCase() || null
+    const email = (editEmail || '').trim().toLowerCase() || null
     if(!display_name){ alert('Nome é obrigatório'); return }
 
     setSaving(true)
@@ -232,6 +250,8 @@ export default function Membros(){
     return res
   }, [members, patrols])
 
+  const addDisabled = adding || !newName.trim() || !newEmail.trim()
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
@@ -283,13 +303,14 @@ export default function Membros(){
 
           <label className="flex items-center gap-2">
             <input type="checkbox" checked={sendInvite} onChange={e=>setSendInvite(e.target.checked)} />
-            Enviar convite por e-mail
+            Enviar convite por e-mail/link
           </label>
 
           <button
             onClick={addMember}
-            disabled={adding}
-            className={`px-3 py-2 rounded text-white ${adding ? 'bg-gray-600' : 'bg-black'}`}
+            disabled={addDisabled}
+            className={`px-3 py-2 rounded text-white ${addDisabled ? 'bg-gray-600' : 'bg-black'}`}
+            title={addDisabled ? 'Preencha nome e e-mail' : 'Adicionar'}
           >
             {adding ? <div className="flex items-center gap-2"><Spinner/> Adicionando...</div> : 'Adicionar'}
           </button>
@@ -297,25 +318,24 @@ export default function Membros(){
       )}
 
       {/* FILTROS */}
-{view === 'table' && (
-  <div className="space-y-2">
-    <div className="text-sm text-white/80">Filtrar por seção:</div>
-<ChipGroup
-  options={[
-    { label: 'Todos',      value: 'all' as const },
-    { label: 'Lobinhos',   value: 'lobinhos' as const },
-    { label: 'Escoteiros', value: 'escoteiros' as const },
-    { label: 'Seniors',    value: 'seniors' as const },
-    { label: 'Pioneiros',  value: 'pioneiros' as const },
-    { label: 'Chefes',     value: 'chefe' as const },
-  ]}
-  value={filterRole}
-  onChange={(v)=>setFilterRole(v)}
-  theme="light"   // 👈
-/>
-  </div>
-)}
-
+      {view === 'table' && (
+        <div className="space-y-2">
+          <div className="text-sm text-white/80">Filtrar por seção:</div>
+          <ChipGroup
+            options={[
+              { label: 'Todos',      value: 'all' as const },
+              { label: 'Lobinhos',   value: 'lobinhos' as const },
+              { label: 'Escoteiros', value: 'escoteiros' as const },
+              { label: 'Seniors',    value: 'seniors' as const },
+              { label: 'Pioneiros',  value: 'pioneiros' as const },
+              { label: 'Chefes',     value: 'chefe' as const },
+            ]}
+            value={filterRole}
+            onChange={(v)=>setFilterRole(v)}
+            theme="light"
+          />
+        </div>
+      )}
 
       {/* VISÃO: TABELA */}
       {view==='table' && (

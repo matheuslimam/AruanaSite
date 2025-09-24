@@ -5,7 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 export default function AuthPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [mode, setMode] = useState<'login'|'signup'>('login')
+  const [mode, setMode] = useState<'login' | 'signup'>('login')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const { session } = useSession()
@@ -25,7 +25,15 @@ export default function AuthPage() {
         const { error } = await supabase.auth.signInWithPassword({ email, password })
         if (error) throw error
       } else {
-        const { error } = await supabase.auth.signUp({ email, password })
+        // no seu AuthPage, no signUp:
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/auth`
+          }
+        });
+
         if (error) throw error
       }
       navigate('/app/atividades', { replace: true })
@@ -60,7 +68,7 @@ export default function AuthPage() {
             placeholder="email"
             type="email"
             value={email}
-            onChange={e=>setEmail(e.target.value)}
+            onChange={e => setEmail(e.target.value)}
             required
           />
 
@@ -69,7 +77,7 @@ export default function AuthPage() {
             placeholder="senha"
             type="password"
             value={password}
-            onChange={e=>setPassword(e.target.value)}
+            onChange={e => setPassword(e.target.value)}
             required
           />
 
@@ -77,15 +85,15 @@ export default function AuthPage() {
             disabled={loading}
             className="w-full rounded bg-black text-white py-2"
           >
-            {loading ? '...' : (mode==='login' ? 'Entrar' : 'Cadastrar')}
+            {loading ? '...' : (mode === 'login' ? 'Entrar' : 'Cadastrar')}
           </button>
 
           <button
             type="button"
-            onClick={()=>setMode(mode==='login' ? 'signup' : 'login')}
+            onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
             className="w-full text-sm underline"
           >
-            {mode==='login' ? 'Criar uma conta' : 'Já tenho conta'}
+            {mode === 'login' ? 'Criar uma conta' : 'Já tenho conta'}
           </button>
 
           {/* Link extra no rodapé do card (opcional) */}
