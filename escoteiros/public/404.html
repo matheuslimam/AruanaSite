@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Redirecting…</title>
+    <meta http-equiv="refresh" content="0; url=%BASE_URL%">
+    <script>
+      /* SPA fallback para GitHub Pages
+         Envia a rota original para index.html via ?p=<rota> */
+      (function (l) {
+        var base = '%BASE_URL%'; // ex.: /AruanaSite/
+        var path = l.pathname;
+        if (path.startsWith(base)) path = path.slice(base.length);
+        l.replace(base + '?p=' + encodeURIComponent(path + l.search + l.hash));
+      })(window.location);
+    </script>
+  </head>
+  <body></body>
+</html>
