@@ -95,7 +95,7 @@ function Modal({ open, onClose, title, children }:{
 
 /* ====== componente do “degrau” do pódio ====== */
 function PodiumStep({
-  rank,
+ // rank,
   row,
   cat,
   height,

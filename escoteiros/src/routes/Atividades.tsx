@@ -27,11 +27,13 @@ const KIND_FILTER_OPTS: { label: string; value: 'all' | ActivityKind }[] = [
 ]
 
 /* ---- tema por seção e ícones por tipo ---- */
+/*
 const SECTION_THEME: Record<PatrolCategory, { ring: string; pill: string; text: string; light: string }> = {
   lobinhos:   { ring: 'ring-emerald-300',  pill: 'bg-emerald-100 text-emerald-700', text: 'text-emerald-900', light: 'from-emerald-50 to-emerald-100' },
   escoteiros: { ring: 'ring-sky-300',      pill: 'bg-sky-100 text-sky-700',         text: 'text-sky-900',     light: 'from-sky-50 to-sky-100' },
   seniors:    { ring: 'ring-violet-300',   pill: 'bg-violet-100 text-violet-700',   text: 'text-violet-900',  light: 'from-violet-50 to-violet-100' },
 }
+*/
 const KIND_ICON: Record<ActivityKind, string> = {
   interna: '🏠',
   externa: '🚶',
