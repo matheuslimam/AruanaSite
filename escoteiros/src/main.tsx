@@ -1,6 +1,10 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { createBrowserRouter, RouterProvider } from 'react-router-dom'
+import {
+  createBrowserRouter,
+  createHashRouter,
+  RouterProvider,
+} from 'react-router-dom'
 import './index.css'
 
 import Landing from './routes/Landing'
@@ -17,7 +21,8 @@ import Checkin from './routes/Checkin'
 import { SessionProvider } from './supabase'
 import { RequireRole, RequireNoGroup, IndexRedirect } from './guards'
 
-const router = createBrowserRouter([
+// ------------------ Rotas (compartilhadas) ------------------
+const routes = [
   { path: '/', element: <Landing /> },
   { path: '/auth', element: <AuthPage /> },
 
@@ -81,7 +86,16 @@ const router = createBrowserRouter([
 
   // fallback
   { path: '*', element: <Landing /> },
-])
+]
+
+// ------------------ Escolha do Router ------------------
+const usingGhPages = import.meta.env.VITE_GH_PAGES === 'true'
+
+// No GH Pages usamos HashRouter para evitar problemas de 404.
+// Em produção “normal”, usamos BrowserRouter com basename do Vite.
+const router = usingGhPages
+  ? createHashRouter(routes)
+  : createBrowserRouter(routes, { basename: import.meta.env.BASE_URL })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
