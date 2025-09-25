@@ -1,8 +1,9 @@
-name: Deploy to GitHub Pages 2
+name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ] # ou a branch que você usa
+    branches: [ main ]   # troque se usar outro branch padrão
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -10,7 +11,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
+  group: pages
   cancel-in-progress: true
 
 jobs:
@@ -24,21 +25,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: escoteiros/package-lock.json
 
       - name: Install
         run: npm ci
+        working-directory: escoteiros
 
-      - name: Build
-        env:
-          VITE_GH_PAGES: "true"
-          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: npm run build
+      # importantíssimo: gerar com base = /<nome-do-repo>/
+      - name: Build (Vite)
+        run: npm run build -- --base=/${{ github.event.repository.name }}/
+        working-directory: escoteiros
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: escoteiros/dist
 
   deploy:
     needs: build
@@ -47,5 +49,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy
+        id: deployment
         uses: actions/deploy-pages@v4
