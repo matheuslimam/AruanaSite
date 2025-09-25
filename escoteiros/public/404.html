@@ -1,19 +1,18 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="pt-BR">
   <head>
-    <meta charset="utf-8" />
-    <title>Redirecting…</title>
-    <meta http-equiv="refresh" content="0; url=%BASE_URL%">
-    <script>
-      /* SPA fallback para GitHub Pages
-         Envia a rota original para index.html via ?p=<rota> */
-      (function (l) {
-        var base = '%BASE_URL%'; // ex.: /AruanaSite/
-        var path = l.pathname;
-        if (path.startsWith(base)) path = path.slice(base.length);
-        l.replace(base + '?p=' + encodeURIComponent(path + l.search + l.hash));
-      })(window.location);
-    </script>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#ffffff" />
+    <title>SAPS</title>
+    <link rel="icon" href="/favicon.ico" />
   </head>
-  <body></body>
+  <body>
+    <div id="root"></div>
+    <!-- Vite vai reescrever este caminho na build de acordo com `base` -->
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>
