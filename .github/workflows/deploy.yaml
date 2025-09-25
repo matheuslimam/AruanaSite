@@ -2,7 +2,7 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]   # troque se usar outro branch padrão
+    branches: [ main ]
   workflow_dispatch:
 
 permissions:
@@ -25,17 +25,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: escoteiros/package-lock.json
 
-      - name: Install
+      - name: Install deps
+        working-directory: escoteiros
         run: npm ci
-        working-directory: escoteiros
 
-      # importantíssimo: gerar com base = /<nome-do-repo>/
-      - name: Build (Vite)
-        run: npm run build -- --base=/${{ github.event.repository.name }}/
+      - name: Build (Vite) with env
         working-directory: escoteiros
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+        run: npm run build -- --base=/${{ github.event.repository.name }}/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -49,6 +49,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Deploy
+      - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4

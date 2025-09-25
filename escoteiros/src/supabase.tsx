@@ -1,8 +1,16 @@
+// escoteiros/src/supabase.tsx
 import { createClient, type Session } from '@supabase/supabase-js'
 import React, { createContext, useContext, useEffect, useState } from 'react'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
+
+if (!supabaseUrl || !supabaseKey) {
+  // Vai aparecer quando as envs não entrarem no bundle
+  console.error('VITE_SUPABASE_URL:', supabaseUrl, 'VITE_SUPABASE_ANON_KEY:', !!supabaseKey)
+  throw new Error('Missing VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY at build time')
+}
+
 export const supabase = createClient(supabaseUrl, supabaseKey)
 
 const SessionCtx = createContext<{ session: Session | null, loading: boolean }>({ session: null, loading: true })
