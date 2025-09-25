@@ -168,125 +168,157 @@ export default function MeuPainel() {
     present: attActivityIds.has(String(a.id)),
   }))
 
-// ===== scan helpers =====
-function parseCheckin(text: string): { t?: string; a?: string } | null {
-  // 1) tenta URL completa (com ou sem hash)
-  try {
-    const u = new URL(text)
-    const hash = u.hash.startsWith('#') ? u.hash.slice(1) : u.hash
+  /* ============ QR helpers ============ */
 
-    // params na query normal
-    let t = u.searchParams.get('t') || ''
-    let a = u.searchParams.get('a') || ''
+  // tenta extrair params de /app/checkin tanto em URL normal quanto em hash (#/app/checkin?...),
+  // além de aceitar somente token ou apenas UUID.
+  function parseCheckin(text: string): { t?: string; a?: string } | null {
+    try {
+      const u = new URL(text)
+      const hash = u.hash.startsWith('#') ? u.hash.slice(1) : u.hash
 
-    // params depois do hash (ex.: #/app/checkin?t=...)
-    if (!t && !a && hash.includes('?')) {
-      const q = new URLSearchParams(hash.split('?')[1] || '')
-      t = q.get('t') || ''
-      a = q.get('a') || ''
-    }
+      let t = u.searchParams.get('t') || ''
+      let a = u.searchParams.get('a') || ''
 
-    const pathOk =
-      u.pathname.endsWith('/app/checkin') ||
-      hash.startsWith('/app/checkin')
+      if (!t && !a && hash.includes('?')) {
+        const q = new URLSearchParams(hash.split('?')[1] || '')
+        t = q.get('t') || ''
+        a = q.get('a') || ''
+      }
 
-    if (pathOk && (t || a)) {
-      return { t: t || undefined, a: a || undefined }
-    }
-  } catch {
-    /* not a URL, segue */
+      const pathOk =
+        u.pathname.endsWith('/app/checkin') ||
+        hash.startsWith('/app/checkin')
+
+      if (pathOk && (t || a)) return { t: t || undefined, a: a || undefined }
+    } catch { /* not a URL */ }
+
+    if (/^[A-Za-z0-9._~-]{8,}$/.test(text)) return { t: text }        // token curto
+    if (/^[0-9a-fA-F-]{36}$/.test(text))    return { a: text }        // UUID atividade
+    return null
   }
 
-  // 2) token simples
-  if (/^[A-Za-z0-9._~-]{8,}$/.test(text)) return { t: text }
+  // fallback seguro: garante os pontos de presença (1 ponto) apenas quando:
+  //  - há `a=` no QR
+  //  - a atividade é do mesmo grupo do usuário
+  //  - ainda NÃO existe lançamento "Presença em <título>"
+  async function ensurePresencePointsForActivity(activityId: string) {
+    try {
+      if (!gid || !profile?.id) return
+      const { data: act, error: e1 } = await supabase
+        .from('activities').select('id,title,group_id')
+        .eq('id', activityId).single()
+      if (e1 || !act || act.group_id !== gid) return
 
-  // 3) UUID da atividade
-  if (/^[0-9a-fA-F-]{36}$/.test(text)) return { a: text }
+      const reason = `Presença em ${act.title}`
+      const { data: existing } = await supabase
+        .from('points')
+        .select('id')
+        .eq('activity_id', activityId)
+        .eq('member_id', profile.id)
+        .eq('reason', reason)
+        .limit(1)
 
-  return null
-}
+      if (existing && existing.length) return // já tem ponto
 
-async function handleDecoded(text: string) {
-  const params = parseCheckin(text)
-  if (!params) {
-    setQrErr('QR inválido. Cole o link ou peça um novo código.')
-    return
+      // 1 ponto base por presença (admin pode reprocessar depois, se usar outro base)
+      await supabase.functions.invoke('award-points', {
+        body: { items: [{ member_id: profile.id, activity_id: activityId, points: 1, reason }] }
+      })
+    } catch { /* silencioso */ }
   }
-  const qs = new URLSearchParams(params as Record<string, string>).toString()
-  await stopScanner()
-  // navega SEM basename; HashRouter acrescenta o "#/" pra você
-  navigate(`/app/checkin?${qs}`, { replace: true })
-}
 
-async function startScanner() {
-  setQrErr(null)
-  const id = `qr-reader-${Date.now()}`
-  setReaderId(id)
-  try {
-    const mod: any = await import('html5-qrcode')
-    const Html5Qrcode = mod.Html5Qrcode
-    await new Promise(r => setTimeout(r, 0)) // espera montar o container
-    const scanner = new Html5Qrcode(id)
-    scannerRef.current = scanner
-    await scanner.start(
-      { facingMode: 'environment' },
-      { fps: 10, qrbox: { width: 260, height: 260 } },
-      (decodedText: string) => handleDecoded(decodedText),
-      () => {} // onError: ignora ruído
-    )
-  } catch {
-    setQrErr('Não consegui acessar a câmera. Dica: permita o uso da câmera ou cole o link abaixo.')
+  async function handleDecoded(text: string) {
+    const params = parseCheckin(text)
+    if (!params) {
+      setQrErr('QR inválido. Cole o link ou peça um novo código.')
+      return
+    }
+
+    // fallback de pontos se tivermos o ID direto da atividade
+    if (params.a) void ensurePresencePointsForActivity(params.a)
+
+    const qs = new URLSearchParams(params as Record<string, string>).toString()
+    await stopScanner()
+    navigate(`/app/checkin?${qs}`, { replace: true })
+  }
+
+  async function startScanner() {
+    setQrErr(null)
+    const id = `qr-reader-${Date.now()}`
+    setReaderId(id)
+    try {
+      const mod: any = await import('html5-qrcode')
+      const Html5Qrcode = mod.Html5Qrcode
+      await new Promise(r => setTimeout(r, 0)) // espera montar o container
+      const scanner = new Html5Qrcode(id)
+      scannerRef.current = scanner
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 260, height: 260 } },
+        (decodedText: string) => handleDecoded(decodedText),
+        () => {} // onError: ignora ruído
+      )
+    } catch {
+      setQrErr('Não consegui acessar a câmera. Dica: permita o uso da câmera ou cole o link abaixo.')
+      scannerRef.current = null
+    }
+  }
+
+  async function stopScanner() {
+    try {
+      await scannerRef.current?.stop()
+      await scannerRef.current?.clear()
+    } catch {}
     scannerRef.current = null
   }
-}
 
-async function stopScanner() {
-  try {
-    await scannerRef.current?.stop()
-    await scannerRef.current?.clear()
-  } catch {}
-  scannerRef.current = null
-}
+  function openQr() {
+    setQrOpen(true)
+    setReaderId('')
+    setManual('')
+    setQrErr(null)
+    setTimeout(startScanner, 50) // inicia após o modal montar
+  }
 
-function openQr() {
-  setQrOpen(true)
-  setReaderId('')
-  setManual('')
-  setQrErr(null)
-  setTimeout(startScanner, 50) // inicia após o modal montar
-}
+  function closeQr() {
+    setQrOpen(false)
+    void stopScanner()
+  }
 
-function closeQr() {
-  setQrOpen(false)
-  void stopScanner()
-}
+  function submitManual() {
+    const v = manual.trim()
+    if (!v) return
+    void handleDecoded(v)
+  }
 
-function submitManual() {
-  const v = manual.trim()
-  if (!v) return
-  void handleDecoded(v)
-}
+  /* ===================== RENDER ===================== */
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
-      {/* HERO */}
+
+      {/* HERO (responsivo) */}
       <section className="rounded-3xl border border-zinc-200 bg-gradient-to-br from-white via-zinc-50 to-emerald-50 text-zinc-900">
-        <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_auto] items-center">
-          <div className="flex items-center gap-4 sm:gap-6">
-            <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white border border-zinc-200 grid place-items-center text-xl font-semibold shadow-sm">
+        <div className="grid gap-4 p-4 sm:gap-6 sm:p-6 lg:grid-cols-[1fr_auto] items-center">
+          <div className="flex items-center gap-3 sm:gap-5">
+            <div className="w-12 h-12 sm:w-16 sm:h-16 lg:w-20 lg:h-20 rounded-2xl bg-white border border-zinc-200 grid place-items-center text-lg sm:text-xl font-semibold shadow-sm shrink-0">
               {initials}
             </div>
-            <div className="space-y-2">
-              <h1 className="text-2xl sm:text-3xl font-extrabold leading-tight">{profile.display_name}</h1>
-              <div className="flex flex-wrap gap-2">
+            <div className="space-y-1 sm:space-y-2 min-w-0">
+              <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold leading-tight truncate">
+                {profile.display_name}
+              </h1>
+              <div className="flex flex-wrap gap-1.5 sm:gap-2">
                 <Chip>{prettyRole(profile.role)}</Chip>
-                <Chip mono>{profile.email ?? '—'}</Chip>
+                <Chip mono><span className="truncate max-w-[9rem] sm:max-w-none">{profile.email ?? '—'}</span></Chip>
                 <Chip>Patrulha: {profile.patrol?.name || '—'}</Chip>
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-5 justify-self-end">
-            <RingLight percent={pct} size={108} stroke={12} />
+
+          <div className="flex items-center gap-4 justify-self-start sm:justify-self-end mt-2 sm:mt-0">
+            <div className="sm:hidden"><RingLight percent={pct} size={84} stroke={10} /></div>
+            <div className="hidden sm:block"><RingLight percent={pct} size={108} stroke={12} /></div>
             <div className="text-sm/5 text-zinc-700">
               <div><b className="text-zinc-900">{myPresenceCount}</b> presenças</div>
               <div><b className="text-zinc-900">{totalActivities}</b> atividades</div>
@@ -302,21 +334,33 @@ function submitManual() {
         <Stat label="Faltas" value={absences} />
       </section>
 
-      {/* Próximas + Calendário */}
+      {/* Agenda (responsiva) */}
       <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="font-semibold">Agenda</h2>
-          <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="font-semibold text-xl sm:text-base">Agenda</h2>
+
+          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
             <button
               onClick={openQr}
-              className="px-3 py-1.5 rounded border text-sm bg-white hover:bg-gray-50"
+              className="w-full sm:w-auto px-3 py-2 sm:py-1.5 rounded border text-sm bg-white hover:bg-gray-50"
               title="Ler QR de check-in"
             >
               Check-in por QR
             </button>
-            <div className="flex rounded-lg overflow-hidden border">
-              <button className={`px-3 py-1 text-sm ${viewMode==='list'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('list')}>Próximas</button>
-              <button className={`px-3 py-1 text-sm ${viewMode==='calendar'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('calendar')}>Calendário</button>
+
+            <div className="grid grid-cols-2 w-full sm:w-auto rounded-lg overflow-hidden border">
+              <button
+                className={`px-3 py-2 sm:py-1 text-sm ${viewMode==='list'?'bg-black text-white':'bg-white'}`}
+                onClick={()=>setViewMode('list')}
+              >
+                Próximas
+              </button>
+              <button
+                className={`px-3 py-2 sm:py-1 text-sm ${viewMode==='calendar'?'bg-black text-white':'bg-white'}`}
+                onClick={()=>setViewMode('calendar')}
+              >
+                Calendário
+              </button>
             </div>
           </div>
         </div>
@@ -330,16 +374,18 @@ function submitManual() {
                 {upcoming.map(a => {
                   const present = attActivityIds.has(String(a.id))
                   return (
-                    <li key={a.id} className="flex items-center justify-between p-3">
-                      <div>
-                        <div className="font-medium">{a.title}</div>
-                        <div className="text-xs text-zinc-600">{new Date(a.date).toLocaleDateString()}</div>
+                    <li key={a.id} className="p-3 sm:p-4">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-2xl border bg-white px-3 py-3">
+                        <div className="min-w-0">
+                          <div className="font-medium truncate">{a.title}</div>
+                          <div className="text-xs text-zinc-600">{new Date(a.date).toLocaleDateString()}</div>
+                        </div>
+                        <span className={`inline-flex items-center justify-center gap-2 text-sm px-2 py-1 rounded-full border self-start sm:self-auto ${present
+                          ? 'bg-emerald-600/10 text-emerald-700 border-emerald-600/30'
+                          : 'bg-zinc-100 text-zinc-700 border-zinc-300'}`}>
+                          {present ? '✔ Presente' : '— Aguardando'}
+                        </span>
                       </div>
-                      <span className={`inline-flex items-center gap-2 text-sm px-2 py-1 rounded-full border ${present
-                        ? 'bg-emerald-600/10 text-emerald-700 border-emerald-600/30'
-                        : 'bg-zinc-100 text-zinc-700 border-zinc-300'}`}>
-                        {present ? '✔ Presente' : '— Aguardando'}
-                      </span>
                     </li>
                   )
                 })}
@@ -423,13 +469,17 @@ function submitManual() {
               const act = recentActivities.find(x => String(x.id) === String(a.activity_id))
               const key = `${a.activity_id}-${a.created_at ?? i}`
               return (
-                <li key={key} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-200 p-3 bg-white">
-                  <div className="flex items-center gap-3">
-                    <span className="inline-grid place-items-center w-7 h-7 rounded-full bg-emerald-600/15 text-emerald-700 text-sm">✔</span>
-                    <div>
-                      <div className="font-medium">{act ? (act.title || `Atividade #${act.id}`) : `Atividade #${String(a.activity_id).slice(0,8)}…`}</div>
-                      <div className="text-xs text-zinc-600">
-                        {act ? new Date(act.date).toLocaleString() : (a.created_at ? new Date(a.created_at).toLocaleString() : '—')}
+                <li key={key} className="rounded-xl border border-zinc-200 bg-white p-3 sm:p-4">
+                  <div className="flex items-start sm:items-center justify-between gap-3 sm:gap-4">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <span className="inline-grid place-items-center w-7 h-7 rounded-full bg-emerald-600/15 text-emerald-700 text-sm shrink-0">✔</span>
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">
+                          {act ? (act.title || `Atividade #${act.id}`) : `Atividade #${String(a.activity_id).slice(0,8)}…`}
+                        </div>
+                        <div className="text-xs text-zinc-600">
+                          {act ? new Date(act.date).toLocaleString() : (a.created_at ? new Date(a.created_at).toLocaleString() : '—')}
+                        </div>
                       </div>
                     </div>
                   </div>
