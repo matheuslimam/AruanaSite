@@ -10,22 +10,26 @@ export default function AuthPage() {
   const navigate = useNavigate()
   const { session } = useSession()
 
-  async function goHomeByRole() {
-    const { data: u } = await supabase.auth.getUser()
-    if (!u.user) return
-    const { data: prof } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('user_id', u.user.id)
-      .maybeSingle()
+async function goHomeByRole() {
+  const { data: u } = await supabase.auth.getUser()
+  if (!u?.user) return
+  const { data: prof } = await supabase
+    .from('profiles')
+    .select('role, group_id')
+    .eq('user_id', u.user.id)
+    .maybeSingle()
 
-    const role = (prof as any)?.role
-    if (role === 'chefe' || role === 'pioneiros') {
-      navigate('/app/atividades', { replace: true })
-    } else {
-      navigate('/app/meu', { replace: true })
-    }
+  // sem profile/grupo -> onboarding
+  if (!prof || !prof.group_id) {
+    navigate('/app/onboarding', { replace:true })
+    return
   }
+
+  const role = (prof as any)?.role
+  if (role === 'chefe' || role === 'pioneiros') navigate('/app/atividades', { replace: true })
+  else navigate('/app/meu', { replace: true })
+}
+
 
   useEffect(() => {
     if (session) {

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import { toPng } from 'html-to-image'
 import type { Patrol, PatrolCategory } from '../types'
+import { useMyProfile } from '../guards'
 
 type Row = { id: string; name: string; category: PatrolCategory; total_points: number }
 
@@ -25,10 +26,9 @@ function Spinner() {
   )
 }
 
-/** Modal simples e acessível */
-function Modal({
-  open, onClose, title, children
-}: { open: boolean; onClose: ()=>void; title: string; children: React.ReactNode }) {
+function Modal({ open, onClose, title, children }:{
+  open: boolean; onClose: ()=>void; title: string; children: React.ReactNode
+}) {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
@@ -45,6 +45,9 @@ function Modal({
 }
 
 export default function Patrulhas(){
+  const { profile } = useMyProfile()
+  const gid = profile?.group_id || null
+
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -64,39 +67,43 @@ export default function Patrulhas(){
   // excluir
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  // dar pontos (opcional, fora do modal)
+  // dar pontos
   const [awardId, setAwardId] = useState('')
   const [awardPoints, setAwardPoints] = useState<number>(0)
   const [awardReason, setAwardReason] = useState('Pontos bônus para patrulha')
   const [awarding, setAwarding] = useState(false)
 
-  // refs para exportar PNG por seção
   const boardRefs = useRef<Record<PatrolCategory, HTMLDivElement | null>>({
     lobinhos: null, escoteiros: null, seniors: null
   })
 
-  async function load() {
+  async function load(groupId: string) {
     setLoading(true)
     const { data, error } = await supabase
       .from('patrol_points_view')
       .select('*')
+      .eq('group_id', groupId)
       .order('total_points', { ascending: false })
-    if (error) { alert(error.message) }
+    if (error) alert(error.message)
     setRows((data as any) || [])
     setLoading(false)
   }
-  useEffect(()=>{ load() },[])
+
+  useEffect(()=>{
+    if (!gid) return
+    setRows([]) // limpa ao trocar de grupo
+    void load(gid)
+  }, [gid])
 
   async function createPatrol(){
     const name = newName.trim()
     if(!name) return
     setCreating(true)
     try{
-      const { error } = await supabase.from('patrols').insert({ name, category: newCat })
+      const { error } = await supabase.from('patrols').insert({ name, category: newCat /* group_id default no DB */ })
       if (error) { alert(error.message); return }
-      setNewName('')
-      setNewCat('escoteiros')
-      await load()
+      setNewName(''); setNewCat('escoteiros')
+      if (gid) await load(gid)
     } finally{
       setCreating(false)
     }
@@ -116,14 +123,11 @@ export default function Patrulhas(){
     if (!name) return
     setSavingEdit(true)
     try{
-      // 1) atualizar dados básicos da patrulha
-      const { error } = await supabase
-        .from('patrols')
+      const { error } = await supabase.from('patrols')
         .update({ name, category: editCat })
         .eq('id', editingRow.id)
       if (error) { alert(error.message); return }
 
-      // 2) ajuste de pontos (se delta ≠ 0) — usa edge function award-points
       if (deltaPoints !== 0) {
         const { error: e2 } = await supabase.functions.invoke('award-points', {
           body: { items: [{ patrol_id: editingRow.id, points: deltaPoints, reason: deltaReason || 'Ajuste manual' }] }
@@ -132,7 +136,7 @@ export default function Patrulhas(){
       }
 
       setEditingRow(null)
-      await load()
+      if (gid) await load(gid)
     } finally{
       setSavingEdit(false)
     }
@@ -144,7 +148,7 @@ export default function Patrulhas(){
     try{
       const { error } = await supabase.from('patrols').delete().eq('id', id)
       if (error) { alert(error.message); return }
-      await load()
+      if (gid) await load(gid)
     } finally{
       setDeletingId(null)
     }
@@ -158,16 +162,14 @@ export default function Patrulhas(){
         body: { items: [{ patrol_id: awardId, points: awardPoints, reason: awardReason }] }
       })
       if (error) { alert((error as any).message || String(error)); return }
-      setAwardPoints(0)
-      setAwardReason('Pontos bônus para patrulha')
-      await load()
+      setAwardPoints(0); setAwardReason('Pontos bônus para patrulha')
+      if (gid) await load(gid)
       alert('Pontos atribuídos com sucesso!')
     } finally{
       setAwarding(false)
     }
   }
 
-  // ====== agrupamento por seção (para mobile e placar) ======
   const grouped = useMemo(() => {
     const map: Record<PatrolCategory, Row[]> = { lobinhos: [], escoteiros: [], seniors: [] }
     for (const r of rows) map[r.category].push(r)
@@ -177,16 +179,11 @@ export default function Patrulhas(){
     return map
   }, [rows])
 
-  // Exporta PNG do nó de uma seção
   async function exportSection(cat: PatrolCategory){
     const node = boardRefs.current[cat]
     if (!node) return alert('Nada para exportar.')
     try {
-      const dataUrl = await toPng(node, {
-        cacheBust: true,
-        backgroundColor: '#ffffff',
-        pixelRatio: 2, // mais nítido
-      })
+      const dataUrl = await toPng(node, { cacheBust: true, backgroundColor: '#ffffff', pixelRatio: 2 })
       const link = document.createElement('a')
       link.download = `placar-${cat}.png`
       link.href = dataUrl
@@ -200,35 +197,25 @@ export default function Patrulhas(){
     <div className="space-y-6">
       <div className="flex items-end justify-between gap-4">
         <h1 className="text-2xl font-bold">Patrulhas</h1>
-        <button onClick={load} className="px-3 py-2 rounded border">Recarregar</button>
+        <button onClick={()=>gid && load(gid)} className="px-3 py-2 rounded border">Recarregar</button>
       </div>
 
-      {/* Criar nova (mobile-first) */}
+      {/* Criar nova */}
       <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 items-stretch sm:items-end">
         <div className="flex-1 min-w-[220px]">
           <label className="text-sm">Nome da patrulha</label>
-          <input
-            className="w-full border rounded p-2"
-            placeholder="Ex.: Lobo"
-            value={newName}
-            onChange={e=>setNewName(e.target.value)}
-          />
+          <input className="w-full border rounded p-2" placeholder="Ex.: Lobo"
+            value={newName} onChange={e=>setNewName(e.target.value)} />
         </div>
         <div>
           <label className="text-sm">Seção</label>
-          <select
-            className="border rounded p-2 w-full"
-            value={newCat}
-            onChange={e=>setNewCat(e.target.value as PatrolCategory)}
-          >
+          <select className="border rounded p-2 w-full"
+            value={newCat} onChange={e=>setNewCat(e.target.value as PatrolCategory)}>
             {CATEGORIES.map(c=> <option key={c.value} value={c.value}>{c.label}</option>)}
           </select>
         </div>
-        <button
-          onClick={createPatrol}
-          disabled={creating}
-          className={`px-3 py-2 rounded text-white ${creating ? 'bg-gray-600' : 'bg-black'}`}
-        >
+        <button onClick={createPatrol} disabled={creating}
+          className={`px-3 py-2 rounded text-white ${creating ? 'bg-gray-600' : 'bg-black'}`}>
           {creating ? <span className="inline-flex items-center gap-2"><Spinner/> Adicionando...</span> : 'Adicionar'}
         </button>
       </div>
@@ -245,21 +232,12 @@ export default function Patrulhas(){
                   <h2 className="text-lg font-semibold">{cat.label}</h2>
                   <span className="text-xs text-gray-500">({list.length} patrulha{list.length===1?'':'s'})</span>
                 </div>
-                <button
-                  onClick={()=>exportSection(cat.value)}
-                  className="px-3 py-1.5 rounded border text-sm"
-                  title="Exportar PNG do placar desta seção"
-                >
+                <button onClick={()=>exportSection(cat.value)} className="px-3 py-1.5 rounded border text-sm">
                   Exportar placar (PNG)
                 </button>
               </div>
 
-              {/* Container do placar (o que vira PNG) */}
-              <div
-                ref={el => { boardRefs.current[cat.value] = el }}
-                className="bg-white rounded-xl border p-3 sm:p-4"
-              >
-                {/* grid mobile-first: 1 col → 2 → 3 */}
+              <div ref={el => { boardRefs.current[cat.value] = el }} className="bg-white rounded-xl border p-3 sm:p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   {list.length === 0 ? (
                     <div className="text-sm text-gray-500">Sem patrulhas nesta seção.</div>
@@ -275,14 +253,9 @@ export default function Patrulhas(){
                       </div>
                       <div className="mt-3 flex gap-2">
                         <button onClick={()=>openEdit(r)} className="px-2 py-1 rounded border text-sm">Editar</button>
-                        <button
-                          onClick={()=>removePatrol(r.id)}
-                          disabled={deletingId === r.id}
-                          className="px-2 py-1 rounded border text-sm"
-                        >
-                          {deletingId === r.id
-                            ? <span className="inline-flex items-center gap-2"><Spinner/> Excluindo…</span>
-                            : 'Excluir'}
+                        <button onClick={()=>removePatrol(r.id)} disabled={deletingId === r.id}
+                          className="px-2 py-1 rounded border text-sm">
+                          {deletingId === r.id ? <span className="inline-flex items-center gap-2"><Spinner/> Excluindo…</span> : 'Excluir'}
                         </button>
                       </div>
                     </div>
@@ -294,7 +267,7 @@ export default function Patrulhas(){
         })
       )}
 
-      {/* (Opcional) Dar pontos direto para qualquer patrulha */}
+      {/* Dar pontos direto */}
       <div className="border rounded-xl p-4 space-y-3">
         <div className="font-medium">Dar pontos para uma patrulha (opcional)</div>
         <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 items-stretch sm:items-end">
@@ -306,52 +279,28 @@ export default function Patrulhas(){
               </option>
             ))}
           </select>
-          <input
-            type="number"
-            className="w-full sm:w-28 border rounded p-2"
-            placeholder="Pontos"
-            value={Number.isNaN(awardPoints) ? 0 : awardPoints}
-            onChange={e=>setAwardPoints(parseInt(e.target.value || '0', 10))}
-          />
-          <input
-            className="flex-1 min-w-[200px] border rounded p-2"
-            placeholder="Motivo"
-            value={awardReason}
-            onChange={e=>setAwardReason(e.target.value)}
-          />
-          <button
-            onClick={awardToPatrol}
-            disabled={awarding}
-            className={`px-3 py-2 rounded text-white ${awarding ? 'bg-gray-600' : 'bg-black'}`}
-          >
+          <input type="number" className="w-full sm:w-28 border rounded p-2"
+            placeholder="Pontos" value={Number.isNaN(awardPoints) ? 0 : awardPoints}
+            onChange={e=>setAwardPoints(parseInt(e.target.value || '0', 10))} />
+          <input className="flex-1 min-w-[200px] border rounded p-2"
+            placeholder="Motivo" value={awardReason} onChange={e=>setAwardReason(e.target.value)} />
+          <button onClick={awardToPatrol} disabled={awarding}
+            className={`px-3 py-2 rounded text-white ${awarding ? 'bg-gray-600' : 'bg-black'}`}>
             {awarding ? <span className="inline-flex items-center gap-2"><Spinner/> Atribuindo…</span> : 'Atribuir'}
           </button>
         </div>
       </div>
 
-      {/* MODAL de edição */}
-      <Modal
-        open={!!editingRow}
-        onClose={()=>setEditingRow(null)}
-        title="Editar patrulha"
-      >
+      <Modal open={!!editingRow} onClose={()=>setEditingRow(null)} title="Editar patrulha">
         <div className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-sm">Nome</label>
-              <input
-                className="w-full border rounded p-2"
-                value={editName}
-                onChange={e=>setEditName(e.target.value)}
-              />
+              <input className="w-full border rounded p-2" value={editName} onChange={e=>setEditName(e.target.value)} />
             </div>
             <div>
               <label className="text-sm">Seção</label>
-              <select
-                className="w-full border rounded p-2"
-                value={editCat}
-                onChange={e=>setEditCat(e.target.value as PatrolCategory)}
-              >
+              <select className="w-full border rounded p-2" value={editCat} onChange={e=>setEditCat(e.target.value as PatrolCategory)}>
                 {CATEGORIES.map(c=> <option key={c.value} value={c.value}>{c.label}</option>)}
               </select>
             </div>
@@ -360,32 +309,19 @@ export default function Patrulhas(){
           <div className="border rounded p-3 space-y-2">
             <div className="font-medium">Ajuste de pontos (opcional)</div>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <input
-                type="number"
-                className="border rounded p-2"
-                placeholder="+/- pontos"
+              <input type="number" className="border rounded p-2" placeholder="+/- pontos"
                 value={Number.isNaN(deltaPoints) ? 0 : deltaPoints}
-                onChange={e=>setDeltaPoints(parseInt(e.target.value || '0', 10))}
-              />
-              <input
-                className="sm:col-span-2 border rounded p-2"
-                placeholder="Motivo"
-                value={deltaReason}
-                onChange={e=>setDeltaReason(e.target.value)}
-              />
+                onChange={e=>setDeltaPoints(parseInt(e.target.value || '0', 10))} />
+              <input className="sm:col-span-2 border rounded p-2" placeholder="Motivo"
+                value={deltaReason} onChange={e=>setDeltaReason(e.target.value)} />
             </div>
-            <div className="text-xs text-gray-500">
-              Dica: use valores negativos para remover pontos (ex.: -5).
-            </div>
+            <div className="text-xs text-gray-500">Dica: use valores negativos para remover pontos (ex.: -5).</div>
           </div>
 
           <div className="flex items-center justify-end gap-2">
             <button onClick={()=>setEditingRow(null)} className="px-3 py-2 rounded border">Cancelar</button>
-            <button
-              onClick={saveEditModal}
-              disabled={savingEdit}
-              className={`px-3 py-2 rounded text-white ${savingEdit ? 'bg-gray-600' : 'bg-black'}`}
-            >
+            <button onClick={saveEditModal} disabled={savingEdit}
+              className={`px-3 py-2 rounded text-white ${savingEdit ? 'bg-gray-600' : 'bg-black'}`}>
               {savingEdit ? <span className="inline-flex items-center gap-2"><Spinner/> Salvando…</span> : 'Salvar'}
             </button>
           </div>

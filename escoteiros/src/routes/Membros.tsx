@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import type { Member, Patrol, MemberRole } from '../types'
 import { ChipGroup } from '../components/Chip'
+import { useMyProfile } from '../guards'
 
 type Row = Member
 type ViewMode = 'table' | 'general'
@@ -16,6 +17,9 @@ const ROLES: { label: string; value: MemberRole }[] = [
 const SECTION_ORDER: MemberRole[] = ['lobinhos','escoteiros','seniors','pioneiros']
 
 export default function Membros(){
+  const { profile } = useMyProfile()
+  const gid = profile?.group_id || null
+
   const [members, setMembers] = useState<Row[]>([])
   const [patrols, setPatrols] = useState<Patrol[]>([])
   const [loading, setLoading] = useState(true)
@@ -47,38 +51,51 @@ export default function Membros(){
   const [filterRole, setFilterRole] = useState<MemberRole | 'all'>('all')
   const [view, setView] = useState<ViewMode>('table')
 
-  async function load(){
+  async function load(groupId: string){
     setLoading(true)
-    const [
-      { data: p },
-      { data: m, error: e2 },
-      actsResp,
-      attResp,
-    ] = await Promise.all([
-      supabase.from('patrols').select('*').order('name'),
+
+    // 1ª rodada: patrulhas / membros / atividades
+    const [pRes, mRes, actsRes] = await Promise.all([
+      supabase.from('patrols').select('*').eq('group_id', groupId).order('name'),
       supabase.from('profiles')
         .select('id, display_name, email, patrol_id, role, is_youth')
+        .eq('group_id', groupId)
         .order('display_name'),
-      supabase.from('activities').select('*', { count: 'exact', head: true }),
-      supabase.from('attendance').select('member_id'),
+      supabase.from('activities').select('*', { count: 'exact', head: true }).eq('group_id', groupId),
     ])
 
-    if (e2) alert(e2.message)
+    const pats = (pRes.data as Patrol[]) || []
+    const mems = (mRes.data as Row[]) || []
+    setPatrols(pats)
+    setMembers(mems)
+    setTotalActivities(actsRes.count || 0)
 
-    setPatrols((p as Patrol[]) || [])
-    setMembers((m as Row[]) || [])
-    setTotalActivities(actsResp.count || 0)
-
-    const map: Record<string, number> = {}
-    ;(attResp.data as { member_id: string }[] | null)?.forEach(r => {
-      map[r.member_id] = (map[r.member_id] ?? 0) + 1
-    })
-    setAttendanceCountByMember(map)
+    // 2ª rodada: presenças somente dos membros do grupo
+    const memberIds = mems.map(x => x.id)
+    let attMap: Record<string, number> = {}
+    if (memberIds.length) {
+      const attRes = await supabase
+        .from('attendance')
+        .select('member_id')
+        .in('member_id', memberIds)
+      attMap = {}
+      ;(attRes.data as { member_id: string }[] | null)?.forEach(r => {
+        attMap[r.member_id] = (attMap[r.member_id] ?? 0) + 1
+      })
+    }
+    setAttendanceCountByMember(attMap)
 
     setLoading(false)
   }
 
-  useEffect(()=>{ load() },[])
+  // 🔁 Recarrega quando o grupo mudar (e limpa a tela)
+  useEffect(()=>{
+    if (!gid) return
+    setMembers([]); setPatrols([])
+    setAttendanceCountByMember({}); setTotalActivities(0)
+    setEditingId(null)
+    void load(gid)
+  }, [gid])
 
   function patrolName(id: string | null){
     if(!id) return '—'
@@ -89,7 +106,6 @@ export default function Membros(){
     return ROLES.find(x=>x.value===r)?.label || r
   }
 
-  // presença (%) de um membro
   function presencePct(memberId: string){
     if (totalActivities <= 0) return 0
     const pres = attendanceCountByMember[memberId] || 0
@@ -107,12 +123,11 @@ export default function Membros(){
       patrol_id: newPatrolId || null,
       role: newRole,
       send_invite: sendInvite,
-      redirect_to: `${window.location.origin}/auth/callback`, // rota de callback (recomendado)
+      redirect_to: `${window.location.origin}/auth/callback`,
     }
 
     setAdding(true)
     try{
-      // pega o token atual (do chefe logado)
       const { data: sess } = await supabase.auth.getSession()
       const token = sess.session?.access_token ?? ''
 
@@ -122,7 +137,6 @@ export default function Membros(){
       })
 
       if (error) {
-        // extrai mensagem da Edge
         const res = (error as any).context?.response
         try {
           const text = res ? await res.text() : ''
@@ -136,28 +150,17 @@ export default function Membros(){
         return
       }
 
-      // sucesso
-      await load()
-      setNewName('')
-      setNewEmail('')
-      setNewPatrolId('')
-      setNewRole('escoteiros')
-      setSendInvite(true)
+      await load(gid!) // recarrega com escopo do grupo atual
+      setNewName(''); setNewEmail(''); setNewPatrolId(''); setNewRole('escoteiros'); setSendInvite(true)
 
       const link = (data as any)?.accessLink as string | null
       const temp = (data as any)?.tempPassword as string | null
       const note = (data as any)?.note as string | null
 
-      // mensagens de retorno (cobre createUser, magiclink e signup link)
-      if (link && temp) {
-        alert(`Membro criado!\n\nSenha temporária:\n${temp}\n\nLink de acesso/inscrição:\n${link}\n\n${note ?? ''}`)
-      } else if (link) {
-        alert(`Membro criado!\n\nLink de acesso/inscrição:\n${link}\n\n${note ?? ''}`)
-      } else if (temp) {
-        alert(`Membro criado!\n\nSenha temporária:\n${temp}\n\n${note ?? ''}`)
-      } else {
-        alert(`Membro criado/vinculado com sucesso.\n${note ?? ''}`)
-      }
+      if (link && temp) alert(`Membro criado!\n\nSenha temporária:\n${temp}\n\nLink:\n${link}\n\n${note ?? ''}`)
+      else if (link)   alert(`Membro criado!\n\nLink:\n${link}\n\n${note ?? ''}`)
+      else if (temp)   alert(`Membro criado!\n\nSenha temporária:\n${temp}\n\n${note ?? ''}`)
+      else             alert(`Membro criado/vinculado com sucesso.\n${note ?? ''}`)
     } finally {
       setAdding(false)
     }
@@ -186,7 +189,7 @@ export default function Membros(){
       if(error){ alert(error.message); return }
 
       setEditingId(null)
-      await load()
+      if (gid) await load(gid)
     } finally {
       setSaving(false)
     }
@@ -194,50 +197,30 @@ export default function Membros(){
 
   function cancelEdit(){
     setEditingId(null)
-    setEditName('')
-    setEditEmail('')
-    setEditPatrolId(null)
-    setEditRole('escoteiros')
+    setEditName(''); setEditEmail(''); setEditPatrolId(null); setEditRole('escoteiros')
   }
 
   async function removeMember(id: string) {
-  if (!confirm('Tem certeza que deseja excluir este membro? Isso também apagará o usuário do Auth.')) return
-  setDeletingId(id)
-  try {
-    const { data: sess } = await supabase.auth.getSession()
-    const token = sess.session?.access_token ?? ''
-
-    const { data, error } = await supabase.functions.invoke('delete-member', {
-      body: {
-        profile_id: id,
-        delete_attendance: true, // opcional
-        delete_auth: true        // opcional
-      },
-      headers: { Authorization: `Bearer ${token}` }
-    })
-
-    if (error) {
-      const res = (error as any).context?.response
-      try {
+    if (!confirm('Tem certeza que deseja excluir este membro? Isso também apagará o usuário do Auth.')) return
+    setDeletingId(id)
+    try{
+      const { data: sess } = await supabase.auth.getSession()
+      const token = sess.session?.access_token ?? ''
+      const { error } = await supabase.functions.invoke('delete-member', {
+        body: { profile_id: id, delete_attendance: true, delete_auth: true },
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (error) {
+        const res = (error as any).context?.response
         const text = res ? await res.text() : ''
-        let msg = text
-        try { msg = JSON.parse(text)?.error ?? text } catch {}
+        let msg = text; try { msg = JSON.parse(text)?.error ?? text } catch {}
         alert(`Erro ${res?.status ?? ''}: ${msg || (error as any).message}`)
-        console.error('EDGE ERROR', res?.status, msg)
-      } catch {
-        alert((error as any).message || 'Erro na Edge')
+        return
       }
-      return
-    }
-
-    await load()
-  } finally {
-    setDeletingId(null)
+      if (gid) await load(gid)
+    } finally { setDeletingId(null) }
   }
-}
 
-
-  // spinner
   const Spinner = () => (
     <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none"/>
@@ -245,14 +228,11 @@ export default function Membros(){
     </svg>
   )
 
-  // membros filtrados (para Tabela)
   const filteredMembers = useMemo(()=>{
     return members.filter(m => filterRole === 'all' ? true : m.role === filterRole)
   }, [members, filterRole])
 
-  // estrutura para visão geral: seção -> patrulha -> membros
   const groupedGeneral = useMemo(()=>{
-    // ordenar patrulhas por nome uma vez
     const sortedPatrols = [...patrols].sort((a,b)=> a.name.localeCompare(b.name))
     const res: Record<MemberRole, { patrol: Patrol, members: Row[] }[]> = {
       lobinhos: [], escoteiros: [], seniors: [], pioneiros: [], chefe: [],
@@ -276,7 +256,6 @@ export default function Membros(){
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-2xl font-bold">Membros</h1>
-        {/* Troca de visão */}
         <div className="flex rounded-lg overflow-hidden border">
           <button
             className={`px-3 py-1 text-sm ${view==='table'?'bg-black text-white':'bg-white'}`}
@@ -289,7 +268,6 @@ export default function Membros(){
         </div>
       </div>
 
-      {/* Criar novo (apenas na Tabela para não poluir a visão geral) */}
       {view==='table' && (
         <div className="flex flex-wrap items-end gap-2">
           <div className="flex-1 min-w-[220px]">
@@ -337,7 +315,6 @@ export default function Membros(){
         </div>
       )}
 
-      {/* FILTROS */}
       {view === 'table' && (
         <div className="space-y-2">
           <div className="text-sm text-white/80">Filtrar por seção:</div>
@@ -357,7 +334,6 @@ export default function Membros(){
         </div>
       )}
 
-      {/* VISÃO: TABELA */}
       {view==='table' && (
         <div className="border rounded overflow-auto">
           <table className="w-full text-sm">
@@ -460,7 +436,6 @@ export default function Membros(){
         </div>
       )}
 
-      {/* VISÃO: GERAL (seção -> patrulhas -> membros) */}
       {view==='general' && (
         <div className="space-y-8">
           <p className="text-xs text-gray-500">

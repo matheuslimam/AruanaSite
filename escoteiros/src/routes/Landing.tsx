@@ -1,12 +1,16 @@
 import { Link } from 'react-router-dom'
 
 export default function Landing() {
+  const brandName = 'SAPS' // 👈 troque aqui se quiser outro nome
+
   return (
     <div className="min-h-screen flex flex-col bg-gradient-to-b from-white via-white to-slate-50">
       {/* Header fixo */}
       <header className="sticky top-0 z-40 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/70 border-b">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-4 py-3">
-          <Link to="/" className="font-extrabold text-xl tracking-tight">Aruanã</Link>
+          <Link to="/" className="font-extrabold text-xl tracking-tight">
+            {brandName}
+          </Link>
           <nav className="flex items-center gap-3">
             <a href="#como-funciona" className="text-sm text-slate-700 hover:text-black">Como funciona</a>
             <a href="#recursos" className="text-sm text-slate-700 hover:text-black">Recursos</a>
@@ -20,40 +24,48 @@ export default function Landing() {
         {/* HERO */}
         <section className="max-w-6xl mx-auto grid md:grid-cols-2 gap-8 items-center px-6 md:px-8 py-10 md:py-16">
           <div>
-            <h1 className="text-4xl md:text-5xl font-extrabold leading-tight">
-              Sempre Alerta! <br className="hidden md:block" />
+            {/* badge */}
+            <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full border bg-emerald-50 text-emerald-700 text-xs font-semibold">
+              🧭 Sempre Alerta
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+              {brandName}
+            </div>
+
+            <h1 className="mt-3 text-4xl md:text-5xl font-extrabold leading-tight">
+              Gestão de Grupo{" "}
               <span className="bg-clip-text text-transparent bg-gradient-to-r from-emerald-600 to-sky-600">
-                Gestão simples para o seu grupo.
+                simples e Sempre Alerta.
               </span>
             </h1>
+
             <p className="mt-4 text-lg text-slate-600">
-              Crie atividades, faça chamada e some pontos por patrulha em poucos cliques.
-              Exporta PNG bonito do placar para divulgar nos encontros e redes.
+              {brandName} (Sempre Alerta para servir) centraliza atividades, chamadas e pontos.
+              Em poucos cliques você organiza o encontro, acompanha o placar e exporta arte pronta para divulgar.
             </p>
 
             <div className="mt-6 flex flex-wrap gap-3">
               <Link to="/auth" className="px-5 py-3 rounded-md bg-black text-white font-medium">
-                Entrar na gestão
+                Entrar no {brandName}
               </Link>
               <a href="#como-funciona" className="px-5 py-3 rounded-md border font-medium">
                 Como funciona
               </a>
             </div>
 
-            <div className="mt-6 flex items-center gap-3 text-xs text-slate-500">
+            <div className="mt-6 flex flex-wrap items-center gap-2 text-xs">
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-emerald-50 text-emerald-700">
-                ✅ Sem planilhas confusas
+                ✅ Sempre Alerta, sempre organizado
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-sky-50 text-sky-700">
                 ⚡ Em tempo real
               </span>
               <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-violet-50 text-violet-700">
-                🖼️ PNG do placar
+                🖼️ Exporta PNG do placar
               </span>
             </div>
           </div>
 
-          {/* “mock” de preview */}
+          {/* mock de preview */}
           <div className="rounded-2xl border bg-white shadow-sm p-5">
             <div className="text-sm font-semibold mb-3">Exemplo do Placar</div>
             <div className="grid grid-cols-3 gap-3">
@@ -189,7 +201,7 @@ export default function Landing() {
       {/* Footer */}
       <footer className="px-6 md:px-8 py-8 border-t">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-slate-500">
-          <div>© {new Date().getFullYear()} Aruanã — feito com ❤️ pela tropa</div>
+          <div>© {new Date().getFullYear()} {brandName} — feito com ❤️ pela tropa</div>
           <div className="flex items-center gap-3">
             <a href="#como-funciona" className="hover:text-slate-700">Como funciona</a>
             <a href="#recursos" className="hover:text-slate-700">Recursos</a>

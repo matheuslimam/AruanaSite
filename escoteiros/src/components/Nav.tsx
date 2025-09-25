@@ -26,23 +26,33 @@ export default function Nav() {
   const isAdminView = role === 'chefe' || role === 'pioneiros'
 
   return (
-    <nav className="flex items-center justify-between p-4 border-b">
-      <Link to={isCommon ? '/app/meu' : '/app/atividades'} className="font-bold">Aruanã</Link>
-      <div className="flex gap-2 sm:gap-4">
+    <nav className="flex items-center justify-between p-4 border-b bg-white">
+      <Link to={isCommon ? '/app/meu' : '/app/atividades'} className="font-bold">
+        {profile?.group?.name || 'Aruanã'}
+      </Link>
+
+      <div className="flex items-center gap-2 sm:gap-4">
         {session ? (
           <>
             {isCommon && (
               <NavLink to="/app/meu" end className={navCls}>Meu painel</NavLink>
             )}
+
             {isAdminView && (
               <>
                 <NavLink to="/app/atividades" end className={navCls}>Atividades</NavLink>
                 <NavLink to="/app/membros" end className={navCls}>Membros</NavLink>
                 <NavLink to="/app/patrulhas" end className={navCls}>Patrulhas</NavLink>
+                <NavLink to="/app/grupo" end className={navCls}>Grupo</NavLink>
               </>
             )}
-            <button type="button" onClick={handleSignOut}
-              className="px-3 py-1 rounded border hover:bg-gray-50">
+
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="px-3 py-1 rounded border hover:bg-gray-50"
+              title="Sair"
+            >
               Sair
             </button>
           </>

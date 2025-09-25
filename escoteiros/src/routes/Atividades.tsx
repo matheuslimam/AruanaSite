@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import type { Activity, ActivityKind, Member, Patrol, PatrolCategory } from '../types'
 import { ChipGroup } from '../components/Chip'
+import { useMyProfile } from '../guards'
 
 type ExtraKey = string
 type ExtraDef = { key: ExtraKey; label: string }
@@ -53,6 +54,9 @@ function todayLocal(): string {
 const isToday = (dateStr?: string|null) => (dateStr || '') === todayLocal()
 
 export default function Atividades(){
+  const { profile } = useMyProfile()
+  const gid = profile?.group_id || null
+
   const [activities, setActivities] = useState<Activity[]>([])
   const [title, setTitle] = useState('')
   const [date, setDate] = useState<string>(()=> todayLocal())
@@ -122,30 +126,39 @@ export default function Atividades(){
     return `${d}/${m}/${y}`
   }
 
-  useEffect(()=>{ (async()=>{
+    useEffect(()=>{ (async()=>{
+    if (!gid) return
+    // limpa quando mudar de grupo
+    setActivities([]); setMembers([]); setPatrols([]); setSelected(null)
+
     const { data: acts } = await supabase
       .from('activities')
       .select('*')
+      .eq('group_id', gid)
       .order('date', { ascending: false })
     setActivities(sortActivities((acts as any) || []))
 
     const { data: mem } = await supabase
       .from('profiles')
       .select('id, display_name, patrol_id, is_youth')
+      .eq('group_id', gid)
       .eq('is_youth', true)
       .order('display_name')
     setMembers((mem as any) || [])
 
-    const { data: pats } = await supabase.from('patrols').select('*').order('name')
+    const { data: pats } = await supabase
+      .from('patrols')
+      .select('*')
+      .eq('group_id', gid)
+      .order('name')
     setPatrols((pats as any) || [])
-  })() },[])
+  })() },[gid])
 
-  // ===== CRUD atividade (meta) =====
   async function createActivity(){
     const { data: user } = await supabase.auth.getUser()
     const { data, error } = await supabase
       .from('activities')
-      .insert({ title, date, kind, created_by: user.user?.id })
+      .insert({ title, date, kind, created_by: user.user?.id }) // group_id é setado no DB
       .select('*').single()
     if(error){ alert(error.message); return }
     setActivities(prev => sortActivities([data as any, ...prev]))
