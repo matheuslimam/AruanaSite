@@ -487,11 +487,11 @@ export default function Atividades(){
     return <span className="text-[11px] px-2 py-0.5 rounded-full bg-green-100 border border-green-300">Atividade de hoje</span>
   }
 
-  // aplica filtro por tipo na lista
-  const visibleActivities = useMemo(()=>{
-    if (filterKind === 'all') return activities
-    return activities.filter(a => (a.kind ?? 'interna') === filterKind)
-  }, [activities, filterKind])
+ // aplica filtro por tipo na lista
+const visibleActivities = useMemo(() => {
+  if (filterKind === 'all') return activities
+  return activities.filter(a => (a.kind ?? 'interna') === filterKind)
+}, [activities, filterKind])
 
 // URL helpers universais (local + GitHub Pages com base)
 const CHECKIN_BASE = new URL(
@@ -520,35 +520,35 @@ async function openQrModal() {
       const { data, error } = await supabase.functions.invoke('issue-checkin-token', {
         body: { activity_id: selected.id }
       })
-      if (!error && data?.token) {
-        url = makeCheckinUrl({ t: data.token })
-        meta = { expires_at: data?.expires_at }
+      if (!error && (data as any)?.token) {
+        url = makeCheckinUrl({ t: (data as any).token })
+        meta = { expires_at: (data as any)?.expires_at }
       }
     } catch { /* segue com a URL simples */ }
 
     setQrUrl(url)
     setTokenInfo(meta)
 
-      // gera PNG com lib local (se instalada)
-      try{
-        const QR: any = await import('qrcode')
-        const png: string = await QR.toDataURL(url, { margin: 1, width: 512 })
-        setQrImg(png)
-      } catch {
-        // fallback para serviço público
-        setQrImg(`https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(url)}`)
-      }
-    } finally{
-      setIssuing(false)
+    // gera PNG com lib local (se instalada)
+    try {
+      const QR: any = await import('qrcode')
+      const png: string = await QR.toDataURL(url, { margin: 1, width: 512 })
+      setQrImg(png)
+    } catch {
+      // fallback para serviço público
+      setQrImg(`https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(url)}`)
     }
+  } finally {
+    setIssuing(false)
   }
+}
 
-  async function copyQrUrl(){
-    try{
-      await navigator.clipboard.writeText(qrUrl)
-      alert('Link de check-in copiado!')
-    } catch {}
-  }
+async function copyQrUrl() {
+  try {
+    await navigator.clipboard.writeText(qrUrl)
+    alert('Link de check-in copiado!')
+  } catch {}
+}
 
   /* ======================= RENDER ======================= */
   const selectedIsToday = selected && isToday(selected.date)
