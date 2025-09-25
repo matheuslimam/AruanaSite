@@ -1,42 +1,46 @@
-name: Deploy
+name: Deploy to GitHub Pages
+
 on:
   push:
-    branches: [ main ]
+    branches: [ main ]   # troque se usar outro branch padrão
+  workflow_dispatch:
 
 permissions:
   contents: read
   pages: write
   id-token: write
 
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'npm'
+          cache: npm
+          cache-dependency-path: escoteiros/package-lock.json
 
-      - name: Install deps
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm i --no-fund --no-audit
-          fi
+      - name: Install
+        run: npm ci
+        working-directory: escoteiros
 
-      # expõe VITE_GH_PAGES para o build (necessário para o QR/linkar rotas no GH Pages)
-      - name: Set env
-        run: echo "VITE_GH_PAGES=true" >> $GITHUB_ENV
+      # importantíssimo: gerar com base = /<nome-do-repo>/
+      - name: Build (Vite)
+        run: npm run build -- --base=/${{ github.event.repository.name }}/
+        working-directory: escoteiros
 
-      - name: Build
-        run: npm run build
-
-      - uses: actions/upload-pages-artifact@v3
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: escoteiros/dist
 
   deploy:
     needs: build
@@ -45,5 +49,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy
+        id: deployment
         uses: actions/deploy-pages@v4
