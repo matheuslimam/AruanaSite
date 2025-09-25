@@ -491,29 +491,37 @@ export default function Atividades(){
     return activities.filter(a => (a.kind ?? 'interna') === filterKind)
   }, [activities, filterKind])
 
-  /* ============ QR helpers ============ */
-  async function openQrModal(){
-    if (!selected) return
-    setIssuing(true)
-    setQrOpen(true)
+// helpers para montar a URL correta em qualquer ambiente
+const IS_GH = import.meta.env.VITE_GH_PAGES === 'true'
+// BASE_URL vem do vite.config.ts (base), já inclui a / do final
+const PUBLIC_BASE = window.location.origin + import.meta.env.BASE_URL
+const CHECKIN_PATH = IS_GH ? '#/app/checkin' : 'app/checkin'
+const makeCheckinUrl = (params: Record<string, string>) =>
+  `${PUBLIC_BASE}${CHECKIN_PATH}?${new URLSearchParams(params).toString()}`
+
+/* ============ QR helpers ============ */
+async function openQrModal(){
+  if (!selected) return
+  setIssuing(true)
+  setQrOpen(true)
+  try{
+    // URL simples (sem token)
+    let url = makeCheckinUrl({ a: encodeURIComponent(selected.id) })
+    let meta: { expires_at?: string } | null = null
+
+    // tenta pegar token curto assinado (se sua Function estiver habilitada)
     try{
-      const base = window.location.origin
-      let url = `${base}/app/checkin?a=${encodeURIComponent(selected.id)}`
-      let meta: { expires_at?: string } | null = null
+      const { data, error } = await supabase.functions.invoke('issue-checkin-token', {
+        body: { activity_id: selected.id }
+      })
+      if (!error && (data as any)?.token) {
+        url = makeCheckinUrl({ t: encodeURIComponent((data as any).token) })
+        meta = { expires_at: (data as any)?.expires_at }
+      }
+    } catch { /* segue com URL simples */ }
 
-      // tenta pegar token curto assinado pela Edge (opcional)
-      try{
-        const { data, error } = await supabase.functions.invoke('issue-checkin-token', {
-          body: { activity_id: selected.id }
-        })
-        if (!error && (data as any)?.token) {
-          url = `${base}/app/checkin?t=${encodeURIComponent((data as any).token)}`
-          meta = { expires_at: (data as any)?.expires_at }
-        }
-      } catch { /* segue com URL simples */ }
-
-      setQrUrl(url)
-      setTokenInfo(meta)
+    setQrUrl(url)
+    setTokenInfo(meta)
 
       // gera PNG com lib local (se instalada)
       try{
