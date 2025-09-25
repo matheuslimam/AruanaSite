@@ -3,6 +3,8 @@ import { supabase } from '../supabase'
 import type { Activity, ActivityKind, Member, Patrol, PatrolCategory } from '../types'
 import { ChipGroup } from '../components/Chip'
 import { useMyProfile } from '../guards'
+import AtividadesCalendar from '../components/AtividadesCalendar'
+
 
 type ExtraKey = string
 type ExtraDef = { key: ExtraKey; label: string }
@@ -487,7 +489,9 @@ export default function Atividades(){
   const selectedIsToday = selected && isToday(selected.date)
 
   return (
+    
     <div className="grid lg:grid-cols-[420px,1fr] gap-8">
+        <AtividadesCalendar groupId={gid} />
       {/* Coluna esquerda: lista + criar + filtros de tipo */}
       <div>
         <div className="sticky top-16 z-10 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-2 pb-3">

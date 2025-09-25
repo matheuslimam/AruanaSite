@@ -1,13 +1,28 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabase'
 import { useMyProfile } from '../guards'
+import Calendar, { type CalendarEvent } from '../components/Calendar'
 
 type AttRow = { activity_id: string; present: boolean; created_at: string | null }
-type ActRow = Record<string, any>
+type ActRow = { id: string; title: string; date: string }
 type BoardItem = { id: string; name: string; category: 'lobinhos'|'escoteiros'|'seniors'; total_points: number }
+
+function pad2(n:number){ return String(n).padStart(2,'0') }
+function todayYMD(){
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}`
+}
+function monthEdges(d = new Date()){
+  const start = new Date(d.getFullYear(), d.getMonth(), 1)
+  const end   = new Date(d.getFullYear(), d.getMonth()+1, 0)
+  const s = `${start.getFullYear()}-${pad2(start.getMonth()+1)}-${pad2(start.getDate())}`
+  const e = `${end.getFullYear()}-${pad2(end.getMonth()+1)}-${pad2(end.getDate())}`
+  return { start, end, s, e }
+}
 
 export default function MeuPainel() {
   const { profile } = useMyProfile()
+  const gid = profile?.group_id || null
 
   // métricas de atividades/presenças
   const [totalActivities, setTotalActivities] = useState(0)
@@ -20,46 +35,86 @@ export default function MeuPainel() {
   const [myPatrolPoints, setMyPatrolPoints] = useState<number | null>(null)
   const [myRank, setMyRank] = useState<number | null>(null)
 
+  // próximas + calendário
+  const [upcoming, setUpcoming] = useState<ActRow[]>([])
+  const [month, setMonth] = useState<Date>(new Date())
+  const [monthActs, setMonthActs] = useState<ActRow[]>([])
+  const [viewMode, setViewMode] = useState<'list'|'calendar'>('list')
+
   useEffect(() => {
-    if (!profile?.id) return
+    if (!profile?.id || !gid) return
     let alive = true
     ;(async () => {
       setLoading(true)
 
-      // 1) total de atividades
-      const totalReq = supabase.from('activities').select('*', { head: true, count: 'exact' })
+      // limites do mês atual
+      const { s: monthStart, e: monthEnd } = monthEdges(month)
+      const today = todayYMD()
 
-      // 2) presenças reais (present = true) deste membro
+      // 1) total atividades do grupo
+      const totalReq = supabase
+        .from('activities')
+        .select('*', { head: true, count: 'exact' })
+        .eq('group_id', gid)
+
+      // 2) presenças deste membro (apenas do grupo)
       const attReq = supabase
         .from('attendance')
-        .select('activity_id,present,created_at')
+        .select('activity_id,present,created_at, activities!inner(group_id)')
         .eq('member_id', profile.id)
         .eq('present', true)
+        .eq('activities.group_id', gid)
         .order('created_at', { ascending: false })
 
-      // 3) últimas 20 atividades
+      // 3) últimas 20 atividades (do grupo)
       const actsReq = supabase
         .from('activities')
-        .select('*')
+        .select('id,title,date')
+        .eq('group_id', gid)
         .order('date', { ascending: false })
         .limit(20)
 
-      // 4) placar/total por patrulha via VIEW (mesma de Patrulhas)
+      // 4) próximas atividades (do grupo, data >= hoje)
+      const upcomingReq = supabase
+        .from('activities')
+        .select('id,title,date')
+        .eq('group_id', gid)
+        .gte('date', today)
+        .order('date', { ascending: true })
+        .limit(10)
+
+      // 5) atividades do mês (para o calendário)
+      const monthReq = supabase
+        .from('activities')
+        .select('id,title,date')
+        .eq('group_id', gid)
+        .gte('date', monthStart)
+        .lte('date', monthEnd)
+        .order('date', { ascending: true })
+
+      // 6) placar por patrulha (do grupo)
       const boardReq = supabase
         .from('patrol_points_view')
         .select('id,name,category,total_points')
+        .eq('group_id', gid)
         .order('total_points', { ascending: false })
 
-      const [totalRes, attRes, actsRes, boardRes] = await Promise.all([totalReq, attReq, actsReq, boardReq])
+      const [totalRes, attRes, actsRes, upcRes, mRes, boardRes] =
+        await Promise.all([totalReq, attReq, actsReq, upcomingReq, monthReq, boardReq])
       if (!alive) return
 
-      // presenças deduplicadas por atividade
-      const rawAtts = (attRes.data as AttRow[]) ?? []
+      const rawAtts = ((attRes.data as any[]) ?? []).map(a => ({
+        activity_id: a.activity_id,
+        present: a.present,
+        created_at: a.created_at,
+      })) as AttRow[]
       const dedup = Array.from(new Map(rawAtts.map(a => [String(a.activity_id), a])).values())
 
       setTotalActivities(totalRes.count || 0)
       setAttendances(dedup)
       setRecentActivities((actsRes.data as ActRow[]) ?? [])
+      setUpcoming((upcRes.data as ActRow[]) ?? [])
+      setMonthActs((mRes.data as ActRow[]) ?? [])
 
       const rows = (boardRes.data as BoardItem[]) ?? []
       setBoard(rows)
@@ -67,8 +122,6 @@ export default function MeuPainel() {
       if (profile.patrol_id) {
         const mine = rows.find(r => r.id === profile.patrol_id)
         setMyPatrolPoints(mine?.total_points ?? 0)
-
-        // ranking só na mesma categoria da patrulha do membro
         const cat = mine?.category || null
         const sameCat = cat ? rows.filter(r => r.category === cat) : rows
         const ordered = [...sameCat].sort((a,b)=> b.total_points - a.total_points || a.name.localeCompare(b.name))
@@ -82,9 +135,9 @@ export default function MeuPainel() {
       setLoading(false)
     })()
     return () => { alive = false }
-  }, [profile?.id, profile?.patrol_id])
+  }, [profile?.id, profile?.patrol_id, gid, month])
 
-  // ===== Hooks (sempre antes de qualquer return!) =====
+  // ===== derivados =====
   const myPresenceCount = attendances.length
   const pct = useMemo(
     () => (totalActivities > 0 ? Math.round((myPresenceCount / totalActivities) * 100) : 0),
@@ -93,7 +146,6 @@ export default function MeuPainel() {
   const absences = Math.max(0, totalActivities - myPresenceCount)
   const attActivityIds = useMemo(() => new Set(attendances.map(a => String(a.activity_id))), [attendances])
 
-  // board filtrado para exibir (mesma categoria do membro); devolve [] se não tiver profile
   const myBoardCat = useMemo(() => {
     const pid = profile?.patrol_id
     if (!pid) return [] as BoardItem[]
@@ -102,24 +154,22 @@ export default function MeuPainel() {
     return board.filter(b => b.category === myRow.category)
   }, [board, profile?.patrol_id])
 
-  // ===== helpers e UI =====
-  const titleOf = (a: ActRow) => a.title || a.name || `Atividade #${a.id ?? ''}`.trim()
-  const dateOf  = (a: ActRow) => {
-    const raw = a.date || a.starts_at || a.created_at
-    if (!raw) return '—'
-    const d = new Date(raw)
-    return isNaN(+d) ? String(raw) : d.toLocaleString()
-  }
+  const initials = (profile?.display_name || 'A').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase()
+  const isCommon = ['lobinhos','escoteiros','seniors'].includes(profile?.role || '')
 
-  // Podemos retornar nulo DEPOIS de todos os hooks
   if (!profile) return null
 
-  const initials = (profile.display_name || 'A').split(' ').map(s=>s[0]).slice(0,2).join('').toUpperCase()
-  const isCommon = ['lobinhos','escoteiros','seniors'].includes(profile.role)
+  // eventos do calendário (marca verde se já há presença)
+  const calEvents: CalendarEvent[] = monthActs.map(a => ({
+    id: a.id,
+    date: a.date,
+    title: a.title,
+    present: attActivityIds.has(String(a.id)),
+  }))
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
-      {/* HERO claro */}
+      {/* HERO */}
       <section className="rounded-3xl border border-zinc-200 bg-gradient-to-br from-white via-zinc-50 to-emerald-50 text-zinc-900">
         <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_auto] items-center">
           <div className="flex items-center gap-4 sm:gap-6">
@@ -152,7 +202,51 @@ export default function MeuPainel() {
         <Stat label="Faltas" value={absences} />
       </section>
 
-      {/* Pontuação da Patrulha (via VIEW) */}
+      {/* Próximas + Calendário */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold">Agenda</h2>
+          <div className="flex rounded-lg overflow-hidden border">
+            <button className={`px-3 py-1 text-sm ${viewMode==='list'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('list')}>Próximas</button>
+            <button className={`px-3 py-1 text-sm ${viewMode==='calendar'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('calendar')}>Calendário</button>
+          </div>
+        </div>
+
+        {viewMode==='list' ? (
+          <div className="rounded-2xl border bg-white">
+            {loading ? <Empty>Carregando…</Empty> : upcoming.length === 0 ? (
+              <Empty>Nenhuma atividade futura.</Empty>
+            ) : (
+              <ul className="divide-y">
+                {upcoming.map(a => {
+                  const present = attActivityIds.has(String(a.id))
+                  return (
+                    <li key={a.id} className="flex items-center justify-between p-3">
+                      <div>
+                        <div className="font-medium">{a.title}</div>
+                        <div className="text-xs text-zinc-600">{new Date(a.date).toLocaleDateString()}</div>
+                      </div>
+                      <span className={`inline-flex items-center gap-2 text-sm px-2 py-1 rounded-full border ${present
+                        ? 'bg-emerald-600/10 text-emerald-700 border-emerald-600/30'
+                        : 'bg-zinc-100 text-zinc-700 border-zinc-300'}`}>
+                        {present ? '✔ Presente' : '— Aguardando'}
+                      </span>
+                    </li>
+                  )
+                })}
+              </ul>
+            )}
+          </div>
+        ) : (
+          <Calendar
+            events={calEvents}
+            month={month}
+            onMonthChange={setMonth}
+          />
+        )}
+      </section>
+
+      {/* Pontuação da Patrulha */}
       <section className="rounded-2xl border border-zinc-200 p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold">Pontuação da patrulha</h2>
@@ -224,44 +318,12 @@ export default function MeuPainel() {
                   <div className="flex items-center gap-3">
                     <span className="inline-grid place-items-center w-7 h-7 rounded-full bg-emerald-600/15 text-emerald-700 text-sm">✔</span>
                     <div>
-                      <div className="font-medium">{act ? titleOf(act) : `Atividade #${String(a.activity_id).slice(0,8)}…`}</div>
+                      <div className="font-medium">{act ? (act.title || `Atividade #${act.id}`) : `Atividade #${String(a.activity_id).slice(0,8)}…`}</div>
                       <div className="text-xs text-zinc-600">
-                        {act ? dateOf(act) : (a.created_at ? new Date(a.created_at).toLocaleString() : '—')}
+                        {act ? new Date(act.date).toLocaleString() : (a.created_at ? new Date(a.created_at).toLocaleString() : '—')}
                       </div>
                     </div>
                   </div>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </section>
-
-      {/* Últimas atividades */}
-      <section className="rounded-2xl border border-zinc-200 p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold">Últimas atividades</h2>
-          <span className="text-sm text-zinc-600">Indicador de presença</span>
-        </div>
-        {loading ? (
-          <Empty>Carregando…</Empty>
-        ) : recentActivities.length === 0 ? (
-          <Empty>Nenhuma atividade encontrada.</Empty>
-        ) : (
-          <ul className="divide-y divide-zinc-200">
-            {recentActivities.map(a => {
-              const present = attActivityIds.has(String(a.id))
-              return (
-                <li key={a.id} className="flex items-center justify-between gap-3 py-2">
-                  <div>
-                    <div className="font-medium">{titleOf(a)}</div>
-                    <div className="text-xs text-zinc-600">{dateOf(a)}</div>
-                  </div>
-                  <span className={`inline-flex items-center gap-2 text-sm px-2 py-1 rounded-full border ${present
-                    ? 'bg-emerald-600/10 text-emerald-700 border-emerald-600/30'
-                    : 'bg-zinc-100 text-zinc-700 border-zinc-300'}`}>
-                    {present ? '✔ Presente' : '— Ausente'}
-                  </span>
                 </li>
               )
             })}
@@ -301,7 +363,9 @@ function Stat({ label, value }: { label: string; value: number }) {
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="rounded-xl border border-zinc-200 p-6 text-center text-sm text-zinc-600 bg-white">{children}</div>
 }
-function RingLight({ percent, size=96, stroke=12 }:{ percent: number; size?: number; stroke?: number }) {
+function RingLight({ percent, size=96, stroke=12 }:{
+  percent: number; size?: number; stroke?: number
+}) {
   const p = Math.max(0, Math.min(100, percent))
   const inner = size - stroke*2
   return (
