@@ -25,6 +25,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
+          cache-dependency-path: escoteiros/package-lock.json
 
       - name: Install deps
         working-directory: escoteiros
@@ -35,7 +37,18 @@ jobs:
         env:
           VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-        run: npm run build -- --base=/${{ github.event.repository.name }}/
+        run: |
+          echo "Building with base=/${{ github.event.repository.name }}/"
+          npm run build -- --base=/${{ github.event.repository.name }}/
+
+      # 🔥 SPA fallback para rotas como /app/checkin, /app/meu etc.
+      - name: Create 404.html (SPA fallback)
+        run: |
+          cp -f escoteiros/dist/index.html escoteiros/dist/404.html
+
+      # (opcional, mas recomendado)
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

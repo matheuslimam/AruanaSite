@@ -493,34 +493,38 @@ export default function Atividades(){
     return activities.filter(a => (a.kind ?? 'interna') === filterKind)
   }, [activities, filterKind])
 
-// helpers para montar a URL correta em qualquer ambiente
-const IS_GH = import.meta.env.VITE_GH_PAGES === 'true'
-// BASE_URL vem do vite.config.ts (base), já inclui a / do final
-const PUBLIC_BASE = window.location.origin + import.meta.env.BASE_URL
-const CHECKIN_PATH = IS_GH ? '#/app/checkin' : 'app/checkin'
-const makeCheckinUrl = (params: Record<string, string>) =>
-  `${PUBLIC_BASE}${CHECKIN_PATH}?${new URLSearchParams(params).toString()}`
+// URL helpers universais (local + GitHub Pages com base)
+const CHECKIN_BASE = new URL(
+  'app/checkin',
+  new URL(import.meta.env.BASE_URL, window.location.origin) // ex.: https://user.github.io/AruanaSite/
+)
+
+const makeCheckinUrl = (params: Record<string, string>) => {
+  const u = new URL(CHECKIN_BASE)
+  Object.entries(params).forEach(([k, v]) => u.searchParams.set(k, v))
+  return u.toString() // ex.: https://user.github.io/AruanaSite/app/checkin?t=...
+}
 
 /* ============ QR helpers ============ */
-async function openQrModal(){
+async function openQrModal() {
   if (!selected) return
   setIssuing(true)
   setQrOpen(true)
-  try{
-    // URL simples (sem token)
-    let url = makeCheckinUrl({ a: encodeURIComponent(selected.id) })
+  try {
+    // URL simples com ID da atividade
+    let url = makeCheckinUrl({ a: selected.id })
     let meta: { expires_at?: string } | null = null
 
-    // tenta pegar token curto assinado (se sua Function estiver habilitada)
-    try{
+    // tenta emitir token curto assinado (se sua Edge Function estiver habilitada)
+    try {
       const { data, error } = await supabase.functions.invoke('issue-checkin-token', {
         body: { activity_id: selected.id }
       })
-      if (!error && (data as any)?.token) {
-        url = makeCheckinUrl({ t: encodeURIComponent((data as any).token) })
-        meta = { expires_at: (data as any)?.expires_at }
+      if (!error && data?.token) {
+        url = makeCheckinUrl({ t: data.token })
+        meta = { expires_at: data?.expires_at }
       }
-    } catch { /* segue com URL simples */ }
+    } catch { /* segue com a URL simples */ }
 
     setQrUrl(url)
     setTokenInfo(meta)
