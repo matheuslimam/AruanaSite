@@ -5,7 +5,6 @@ import { ChipGroup } from '../components/Chip'
 import { useMyProfile } from '../guards'
 import AtividadesCalendar from '../components/AtividadesCalendar'
 
-
 type ExtraKey = string
 type ExtraDef = { key: ExtraKey; label: string }
 
@@ -107,6 +106,13 @@ export default function Atividades(){
   const [editDate, setEditDate] = useState<string>('')
   const [editKind, setEditKind] = useState<ActivityKind>('interna')
 
+  // === QR STATE ===
+  const [qrOpen, setQrOpen] = useState(false)
+  const [qrUrl, setQrUrl] = useState<string>('')
+  const [qrImg, setQrImg] = useState<string>('')  // dataURL ou fallback URL
+  const [issuing, setIssuing] = useState(false)
+  const [tokenInfo, setTokenInfo] = useState<{ expires_at?: string }|null>(null)
+
   // --- ordenação com "hoje" em primeiro e, depois, data desc
   const sortActivities = (arr: Activity[]) => {
     const t = todayLocal()
@@ -128,7 +134,7 @@ export default function Atividades(){
     return `${d}/${m}/${y}`
   }
 
-    useEffect(()=>{ (async()=>{
+  useEffect(()=>{ (async()=>{
     if (!gid) return
     // limpa quando mudar de grupo
     setActivities([]); setMembers([]); setPatrols([]); setSelected(null)
@@ -485,13 +491,58 @@ export default function Atividades(){
     return activities.filter(a => (a.kind ?? 'interna') === filterKind)
   }, [activities, filterKind])
 
+  /* ============ QR helpers ============ */
+  async function openQrModal(){
+    if (!selected) return
+    setIssuing(true)
+    setQrOpen(true)
+    try{
+      const base = window.location.origin
+      let url = `${base}/app/checkin?a=${encodeURIComponent(selected.id)}`
+      let meta: { expires_at?: string } | null = null
+
+      // tenta pegar token curto assinado pela Edge (opcional)
+      try{
+        const { data, error } = await supabase.functions.invoke('issue-checkin-token', {
+          body: { activity_id: selected.id }
+        })
+        if (!error && (data as any)?.token) {
+          url = `${base}/app/checkin?t=${encodeURIComponent((data as any).token)}`
+          meta = { expires_at: (data as any)?.expires_at }
+        }
+      } catch { /* segue com URL simples */ }
+
+      setQrUrl(url)
+      setTokenInfo(meta)
+
+      // gera PNG com lib local (se instalada)
+      try{
+        const QR: any = await import('qrcode')
+        const png: string = await QR.toDataURL(url, { margin: 1, width: 512 })
+        setQrImg(png)
+      } catch {
+        // fallback para serviço público
+        setQrImg(`https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(url)}`)
+      }
+    } finally{
+      setIssuing(false)
+    }
+  }
+
+  async function copyQrUrl(){
+    try{
+      await navigator.clipboard.writeText(qrUrl)
+      alert('Link de check-in copiado!')
+    } catch {}
+  }
+
   /* ======================= RENDER ======================= */
   const selectedIsToday = selected && isToday(selected.date)
 
   return (
-    
     <div className="grid lg:grid-cols-[420px,1fr] gap-8">
-        <AtividadesCalendar groupId={gid} />
+      <AtividadesCalendar groupId={gid} />
+
       {/* Coluna esquerda: lista + criar + filtros de tipo */}
       <div>
         <div className="sticky top-16 z-10 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b pt-2 pb-3">
@@ -580,16 +631,21 @@ export default function Atividades(){
           <>
             {/* METADADOS */}
             <div className={`rounded-2xl border p-3 ring-1 ring-inset ${selectedIsToday ? 'ring-emerald-200' : 'ring-slate-200'}`}>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div className="font-medium">Detalhes da atividade</div>
-                {!isEditingMeta ? (
-                  <button onClick={startEditMeta} className="px-2 py-1 rounded-lg border text-sm hover:bg-gray-50">Editar</button>
-                ) : (
-                  <div className="flex gap-2">
-                    <button onClick={saveEditMeta} className="px-2 py-1 rounded-lg bg-black text-white text-sm">Salvar</button>
-                    <button onClick={cancelEditMeta} className="px-2 py-1 rounded-lg border text-sm">Cancelar</button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <button onClick={openQrModal} className="px-2 py-1 rounded-lg border text-sm hover:bg-gray-50">
+                    QR de check-in
+                  </button>
+                  {!isEditingMeta ? (
+                    <button onClick={startEditMeta} className="px-2 py-1 rounded-lg border text-sm hover:bg-gray-50">Editar</button>
+                  ) : (
+                    <div className="flex gap-2">
+                      <button onClick={saveEditMeta} className="px-2 py-1 rounded-lg bg-black text-white text-sm">Salvar</button>
+                      <button onClick={cancelEditMeta} className="px-2 py-1 rounded-lg border text-sm">Cancelar</button>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {!isEditingMeta ? (
@@ -631,148 +687,140 @@ export default function Atividades(){
               </div>
             </div>
 
-          {/* chamada + extras (responsivo) */}
-<div className="rounded-2xl border overflow-hidden">
-  <div className="bg-gradient-to-r from-slate-50 to-white px-3 py-2 text-xs text-slate-600 border-b">
-    Marque presença e extras (cada extra vale o “ponto base”).
-    {loadingHydrate && <span className="ml-2 italic text-slate-400">(carregando…)</span>}
-  </div>
+            {/* chamada + extras (responsivo) */}
+            <div className="rounded-2xl border overflow-hidden">
+              <div className="bg-gradient-to-r from-slate-50 to-white px-3 py-2 text-xs text-slate-600 border-b">
+                Marque presença e extras (cada extra vale o “ponto base”).
+                {loadingHydrate && <span className="ml-2 italic text-slate-400">(carregando…)</span>}
+              </div>
 
-  {/* --- MOBILE (até md) → cards --- */}
-  <div className="md:hidden divide-y">
-    {filteredMembers.map((m, idx) => {
-      const checked = !!present[m.id]
-      const rowSel  = extrasSelected[m.id] || {}
-      const cat     = memberSection(m)
-      return (
-        <div key={m.id} className="p-3">
-          <div className="flex items-start justify-between gap-3">
-            {/* Presença “grande” no mobile */}
-            <label className="inline-flex items-center gap-2 select-none">
-              <input
-                type="checkbox"
-                className="h-5 w-5"
-                checked={checked}
-                onChange={e=>setPresent(prev=>({...prev, [m.id]: e.target.checked}))}
-              />
-              <span className="text-sm font-medium">{m.display_name}</span>
-            </label>
+              {/* --- MOBILE --- */}
+              <div className="md:hidden divide-y">
+                {filteredMembers.map((m) => {
+                  const checked = !!present[m.id]
+                  const rowSel  = extrasSelected[m.id] || {}
+                  const cat     = memberSection(m)
+                  return (
+                    <div key={m.id} className="p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <label className="inline-flex items-center gap-2 select-none">
+                          <input
+                            type="checkbox"
+                            className="h-5 w-5"
+                            checked={checked}
+                            onChange={e=>setPresent(prev=>({...prev, [m.id]: e.target.checked}))}
+                          />
+                          <span className="text-sm font-medium">{m.display_name}</span>
+                        </label>
+                        <div>
+                          {cat && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded ring-1 ring-inset ${
+                              cat==='lobinhos'   ? 'bg-emerald-100 text-emerald-700 ring-emerald-300' :
+                              cat==='escoteiros' ? 'bg-sky-100 text-sky-700 ring-sky-300' :
+                                                   'bg-violet-100 text-violet-700 ring-violet-300'
+                            }`}>
+                              {cat}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Patrulha: <span className="font-medium text-slate-700">{patrolName(m.patrol_id)}</span>
+                      </div>
+                      {extraDefs.length > 0 && (
+                        <div className="mt-3 grid grid-cols-2 gap-2">
+                          {extraDefs.map(d => (
+                            <label key={d.key} className="flex items-center gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={!!rowSel[d.key]}
+                                onChange={e=>toggleExtra(m.id, d.key, e.target.checked)}
+                              />
+                              <span className="truncate">{d.label}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                {filteredMembers.length === 0 && (
+                  <div className="p-6 text-center text-sm text-gray-500">Nenhum membro na filtragem atual.</div>
+                )}
+              </div>
 
-            {/* Chip de seção */}
-            <div>
-              {cat && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded ring-1 ring-inset ${
-                  cat==='lobinhos'   ? 'bg-emerald-100 text-emerald-700 ring-emerald-300' :
-                  cat==='escoteiros' ? 'bg-sky-100 text-sky-700 ring-sky-300' :
-                                       'bg-violet-100 text-violet-700 ring-violet-300'
-                }`}>
-                  {cat}
-                </span>
-              )}
+              {/* --- DESKTOP --- */}
+              <div className="hidden md:block max-h-[460px] overflow-auto">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-white border-b">
+                    <tr className="text-left">
+                      <th className="p-2 w-14">Pres.</th>
+                      <th className="py-2">Nome</th>
+                      <th className="py-2">Patrulha</th>
+                      {extraDefs.map(d=>(
+                        <th key={d.key} className="py-2 text-center">{d.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredMembers.map((m, idx)=>{
+                      const checked = !!present[m.id]
+                      const rowSel  = extrasSelected[m.id] || {}
+                      const cat     = memberSection(m)
+                      const stripe  = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'
+                      const ring    = cat==='lobinhos'   ? 'ring-emerald-200' :
+                                      cat==='escoteiros' ? 'ring-sky-200'     :
+                                      cat==='seniors'    ? 'ring-violet-200'  : 'ring-slate-200'
+                      return (
+                        <tr key={m.id} className={`${stripe} border-b`}>
+                          <td className="p-2">
+                            <input
+                              type="checkbox"
+                              className="h-4 w-4"
+                              checked={checked}
+                              onChange={e=>setPresent(prev=>({...prev, [m.id]: e.target.checked}))}
+                            />
+                          </td>
+                          <td className="py-2">
+                            <div className={`inline-flex items-center gap-2 px-2 py-0.5 rounded-lg ring-1 ring-inset ${ring}`}>
+                              <span className="font-medium">{m.display_name}</span>
+                              {cat && (
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                  cat==='lobinhos'   ? 'bg-emerald-100 text-emerald-700' :
+                                  cat==='escoteiros' ? 'bg-sky-100 text-sky-700' :
+                                                       'bg-violet-100 text-violet-700'
+                                }`}>
+                                  {cat}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2">{patrolName(m.patrol_id)}</td>
+                          {extraDefs.map(d=>(
+                            <td key={d.key} className="py-2 text-center">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4"
+                                checked={!!rowSel[d.key]}
+                                onChange={e=>toggleExtra(m.id, d.key, e.target.checked)}
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      )
+                    })}
+                    {filteredMembers.length === 0 && (
+                      <tr>
+                        <td colSpan={3 + extraDefs.length} className="py-8 text-center text-gray-500">
+                          Nenhum membro na filtragem atual.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-
-          {/* Patrulha */}
-          <div className="mt-1 text-xs text-slate-500">
-            Patrulha: <span className="font-medium text-slate-700">{patrolName(m.patrol_id)}</span>
-          </div>
-
-          {/* Extras: grid fluida 2 col (quebra se precisar) */}
-          {extraDefs.length > 0 && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              {extraDefs.map(d => (
-                <label key={d.key} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={!!rowSel[d.key]}
-                    onChange={e=>toggleExtra(m.id, d.key, e.target.checked)}
-                  />
-                  <span className="truncate">{d.label}</span>
-                </label>
-              ))}
-            </div>
-          )}
-        </div>
-      )
-    })}
-    {filteredMembers.length === 0 && (
-      <div className="p-6 text-center text-sm text-gray-500">Nenhum membro na filtragem atual.</div>
-    )}
-  </div>
-
-  {/* --- DESKTOP (md+) → tabela --- */}
-  <div className="hidden md:block max-h-[460px] overflow-auto">
-    <table className="w-full text-sm">
-      <thead className="sticky top-0 bg-white border-b">
-        <tr className="text-left">
-          <th className="p-2 w-14">Pres.</th>
-          <th className="py-2">Nome</th>
-          <th className="py-2">Patrulha</th>
-          {extraDefs.map(d=>(
-            <th key={d.key} className="py-2 text-center">{d.label}</th>
-          ))}
-        </tr>
-      </thead>
-      <tbody>
-        {filteredMembers.map((m, idx)=>{
-          const checked = !!present[m.id]
-          const rowSel  = extrasSelected[m.id] || {}
-          const cat     = memberSection(m)
-          const stripe  = idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'
-          const ring    = cat==='lobinhos'   ? 'ring-emerald-200' :
-                          cat==='escoteiros' ? 'ring-sky-200'     :
-                          cat==='seniors'    ? 'ring-violet-200'  : 'ring-slate-200'
-          return (
-            <tr key={m.id} className={`${stripe} border-b`}>
-              <td className="p-2">
-                <input
-                  type="checkbox"
-                  className="h-4 w-4"
-                  checked={checked}
-                  onChange={e=>setPresent(prev=>({...prev, [m.id]: e.target.checked}))}
-                />
-              </td>
-              <td className="py-2">
-                <div className={`inline-flex items-center gap-2 px-2 py-0.5 rounded-lg ring-1 ring-inset ${ring}`}>
-                  <span className="font-medium">{m.display_name}</span>
-                  {cat && (
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded ${
-                      cat==='lobinhos'   ? 'bg-emerald-100 text-emerald-700' :
-                      cat==='escoteiros' ? 'bg-sky-100 text-sky-700' :
-                                           'bg-violet-100 text-violet-700'
-                    }`}>
-                      {cat}
-                    </span>
-                  )}
-                </div>
-              </td>
-              <td className="py-2">{patrolName(m.patrol_id)}</td>
-              {extraDefs.map(d=>(
-                <td key={d.key} className="py-2 text-center">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={!!rowSel[d.key]}
-                    onChange={e=>toggleExtra(m.id, d.key, e.target.checked)}
-                  />
-                </td>
-              ))}
-            </tr>
-          )
-        })}
-        {filteredMembers.length === 0 && (
-          <tr>
-            <td colSpan={3 + extraDefs.length} className="py-8 text-center text-gray-500">
-              Nenhum membro na filtragem atual.
-            </td>
-          </tr>
-        )}
-      </tbody>
-    </table>
-  </div>
-</div>
-
 
             {/* adicionar novo parâmetro */}
             <div className="rounded-2xl border p-3">
@@ -845,6 +893,67 @@ export default function Atividades(){
           </>
         )}
       </div>
+
+      {/* ===== Modal do QR ===== */}
+      {qrOpen && (
+        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={()=>setQrOpen(false)} />
+          <div className="relative z-50 w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-lg p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold">QR de check-in</h3>
+              <button onClick={()=>setQrOpen(false)} className="p-2 rounded hover:bg-gray-100" aria-label="Fechar">✕</button>
+            </div>
+
+            {!selected ? (
+              <div className="text-sm text-gray-600">Selecione uma atividade.</div>
+            ) : (
+              <div className="space-y-4">
+                <div className="text-sm">
+                  Atividade: <b>{selected.title}</b> — {formatBR(selected.date)}
+                </div>
+
+                <div className="rounded-xl border p-3 grid place-items-center bg-white">
+                  {issuing ? (
+                    <div className="text-sm text-gray-600">Gerando código…</div>
+                  ) : qrImg ? (
+                    <img src={qrImg} alt="QR code" className="w-full max-w-xs h-auto" />
+                  ) : (
+                    <div className="text-sm text-gray-600">Não foi possível gerar o QR.</div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border p-3 bg-gray-50">
+                  <div className="text-xs text-gray-600 mb-1">Link do check-in</div>
+                  <div className="flex items-center gap-2">
+                    <input readOnly className="flex-1 border rounded px-2 py-1 bg-white text-xs"
+                      value={qrUrl} />
+                    <button onClick={copyQrUrl} className="px-2 py-1 rounded border text-sm bg-white">Copiar</button>
+                  </div>
+                  {tokenInfo?.expires_at && (
+                    <div className="mt-1 text-xs text-gray-500">
+                      Este QR expira em: {new Date(tokenInfo.expires_at).toLocaleString()}
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <a
+                    href={qrImg || '#'}
+                    download={`checkin-${selected.id}.png`}
+                    className={`px-3 py-2 rounded border text-sm ${qrImg ? 'bg-white' : 'pointer-events-none opacity-50'}`}
+                  >
+                    Baixar PNG
+                  </a>
+                  <button onClick={()=>window.open(qrUrl, '_blank')}
+                    className="px-3 py-2 rounded bg-black text-white text-sm">
+                    Abrir link
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

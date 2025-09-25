@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useMyProfile } from '../guards'
 import Calendar, { type CalendarEvent } from '../components/Calendar'
@@ -23,6 +24,7 @@ function monthEdges(d = new Date()){
 export default function MeuPainel() {
   const { profile } = useMyProfile()
   const gid = profile?.group_id || null
+  const navigate = useNavigate()
 
   // métricas de atividades/presenças
   const [totalActivities, setTotalActivities] = useState(0)
@@ -41,23 +43,26 @@ export default function MeuPainel() {
   const [monthActs, setMonthActs] = useState<ActRow[]>([])
   const [viewMode, setViewMode] = useState<'list'|'calendar'>('list')
 
+  // ===== Scanner QR =====
+  const [qrOpen, setQrOpen] = useState(false)
+  const [qrErr, setQrErr] = useState<string | null>(null)
+  const [readerId, setReaderId] = useState<string>('') // id do container
+  const [manual, setManual] = useState('')
+  const scannerRef = useRef<any>(null)
+
   useEffect(() => {
     if (!profile?.id || !gid) return
     let alive = true
     ;(async () => {
       setLoading(true)
-
-      // limites do mês atual
       const { s: monthStart, e: monthEnd } = monthEdges(month)
       const today = todayYMD()
 
-      // 1) total atividades do grupo
       const totalReq = supabase
         .from('activities')
         .select('*', { head: true, count: 'exact' })
         .eq('group_id', gid)
 
-      // 2) presenças deste membro (apenas do grupo)
       const attReq = supabase
         .from('attendance')
         .select('activity_id,present,created_at, activities!inner(group_id)')
@@ -66,7 +71,6 @@ export default function MeuPainel() {
         .eq('activities.group_id', gid)
         .order('created_at', { ascending: false })
 
-      // 3) últimas 20 atividades (do grupo)
       const actsReq = supabase
         .from('activities')
         .select('id,title,date')
@@ -74,7 +78,6 @@ export default function MeuPainel() {
         .order('date', { ascending: false })
         .limit(20)
 
-      // 4) próximas atividades (do grupo, data >= hoje)
       const upcomingReq = supabase
         .from('activities')
         .select('id,title,date')
@@ -83,7 +86,6 @@ export default function MeuPainel() {
         .order('date', { ascending: true })
         .limit(10)
 
-      // 5) atividades do mês (para o calendário)
       const monthReq = supabase
         .from('activities')
         .select('id,title,date')
@@ -92,7 +94,6 @@ export default function MeuPainel() {
         .lte('date', monthEnd)
         .order('date', { ascending: true })
 
-      // 6) placar por patrulha (do grupo)
       const boardReq = supabase
         .from('patrol_points_view')
         .select('id,name,category,total_points')
@@ -167,6 +168,85 @@ export default function MeuPainel() {
     present: attActivityIds.has(String(a.id)),
   }))
 
+  // ===== scan helpers =====
+  function handleDecoded(text: string){
+    // tenta URL completa
+    try {
+      const u = new URL(text)
+      if (u.pathname.endsWith('/app/checkin') && (u.searchParams.get('t') || u.searchParams.get('a'))) {
+        stopScanner().finally(()=> {
+          navigate(u.pathname + u.search, { replace: true })
+        })
+        return
+      }
+    } catch {/* not a URL */}
+
+    // token simples
+    if (/^[A-Za-z0-9._~-]{8,}$/.test(text)) {
+      stopScanner().finally(()=> navigate(`/app/checkin?t=${encodeURIComponent(text)}`, { replace: true }))
+      return
+    }
+    // UUID de atividade
+    if (/^[0-9a-fA-F-]{36}$/.test(text)) {
+      stopScanner().finally(()=> navigate(`/app/checkin?a=${encodeURIComponent(text)}`, { replace: true }))
+      return
+    }
+
+    setQrErr('QR inválido. Cole o link ou peça um novo código.')
+  }
+
+  async function startScanner(){
+    setQrErr(null)
+    const id = `qr-reader-${Date.now()}`
+    setReaderId(id)
+    try{
+      // import dinâmico (instale: npm i html5-qrcode)
+      const mod: any = await import('html5-qrcode')
+      const Html5Qrcode = mod.Html5Qrcode
+      // aguarda o container aparecer
+      await new Promise(r => setTimeout(r, 0))
+      const scanner = new Html5Qrcode(id)
+      scannerRef.current = scanner
+      await scanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 260, height: 260 } },
+        (decodedText: string) => handleDecoded(decodedText),
+        () => {} // onError: ignora ruído
+      )
+    } catch (e:any){
+      setQrErr('Não consegui acessar a câmera. Dica: permita o uso da câmera ou cole o link abaixo.')
+      scannerRef.current = null
+    }
+  }
+
+  async function stopScanner(){
+    try{
+      await scannerRef.current?.stop()
+      await scannerRef.current?.clear()
+    } catch {}
+    scannerRef.current = null
+  }
+
+  function openQr(){
+    setQrOpen(true)
+    setReaderId('')
+    setManual('')
+    setQrErr(null)
+    // inicia após o modal montar
+    setTimeout(startScanner, 50)
+  }
+
+  function closeQr(){
+    setQrOpen(false)
+    void stopScanner()
+  }
+
+  function submitManual(){
+    const v = manual.trim()
+    if (!v) return
+    handleDecoded(v)
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
       {/* HERO */}
@@ -206,9 +286,18 @@ export default function MeuPainel() {
       <section className="space-y-3">
         <div className="flex items-center justify-between">
           <h2 className="font-semibold">Agenda</h2>
-          <div className="flex rounded-lg overflow-hidden border">
-            <button className={`px-3 py-1 text-sm ${viewMode==='list'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('list')}>Próximas</button>
-            <button className={`px-3 py-1 text-sm ${viewMode==='calendar'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('calendar')}>Calendário</button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={openQr}
+              className="px-3 py-1.5 rounded border text-sm bg-white hover:bg-gray-50"
+              title="Ler QR de check-in"
+            >
+              Check-in por QR
+            </button>
+            <div className="flex rounded-lg overflow-hidden border">
+              <button className={`px-3 py-1 text-sm ${viewMode==='list'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('list')}>Próximas</button>
+              <button className={`px-3 py-1 text-sm ${viewMode==='calendar'?'bg-black text-white':'bg-white'}`} onClick={()=>setViewMode('calendar')}>Calendário</button>
+            </div>
           </div>
         </div>
 
@@ -333,6 +422,51 @@ export default function MeuPainel() {
 
       {isCommon && (
         <p className="text-xs text-zinc-600">Dica: esta página mostra apenas suas informações e estatísticas pessoais.</p>
+      )}
+
+      {/* ==== Modal Scanner ==== */}
+      {qrOpen && (
+        <div className="fixed inset-0 z-40 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/40" onClick={closeQr} />
+          <div className="relative z-50 w-full sm:max-w-lg bg-white rounded-t-2xl sm:rounded-2xl shadow-lg p-4 sm:p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-lg font-semibold">Check-in por QR</h3>
+              <button onClick={closeQr} className="p-2 rounded hover:bg-gray-100" aria-label="Fechar">✕</button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-xl border bg-black/90 text-white grid place-items-center p-3 min-h-[280px]">
+                {readerId ? (
+                  <div id={readerId} className="w-full max-w-xs aspect-square" />
+                ) : (
+                  <div className="text-sm opacity-80">Abrindo câmera…</div>
+                )}
+              </div>
+
+              {qrErr && <div className="text-xs text-red-600">{qrErr}</div>}
+
+              <div className="rounded-lg border p-3 bg-gray-50">
+                <div className="text-xs text-zinc-600 mb-1">
+                  Sem câmera? Cole aqui o link/código do QR:
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    className="flex-1 border rounded px-2 py-1 bg-white text-sm"
+                    placeholder="Ex.: https://seuapp.com/app/checkin?t=...  ou  123e4567-e89b-12d3-a456-426614174000"
+                    value={manual}
+                    onChange={e=>setManual(e.target.value)}
+                  />
+                  <button onClick={submitManual} className="px-3 py-1.5 rounded border bg-white text-sm">
+                    Confirmar
+                  </button>
+                </div>
+                <div className="text-[11px] text-zinc-500 mt-1">
+                  Dica: permita o acesso à câmera do navegador para leitura automática.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

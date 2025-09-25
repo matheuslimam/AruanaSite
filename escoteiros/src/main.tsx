@@ -12,6 +12,7 @@ import Patrulhas from './routes/Patrulhas'
 import MeuPainel from './pages/MeuPainel'
 import Onboarding from './routes/Onboarding'
 import Grupo from './routes/Grupo'
+import Checkin from './routes/Checkin'
 
 import { SessionProvider } from './supabase'
 import { RequireRole, RequireNoGroup, IndexRedirect } from './guards'
@@ -19,14 +20,20 @@ import { RequireRole, RequireNoGroup, IndexRedirect } from './guards'
 const router = createBrowserRouter([
   { path: '/', element: <Landing /> },
   { path: '/auth', element: <AuthPage /> },
+
   {
     path: '/app',
     element: <AppLayout />, // exige usuário logado
     children: [
-      { index: true, element: <IndexRedirect /> }, // /app -> correto por role/grupo
+      { index: true, element: <IndexRedirect /> }, // /app -> redireciona conforme role/grupo
+
+      // onboarding (somente quem ainda NÃO tem group_id)
       { path: 'onboarding', element: <RequireNoGroup><Onboarding /></RequireNoGroup> },
 
-      // comuns
+      // rota aberta a QUALQUER usuário autenticado (para ler QR e confirmar presença)
+      { path: 'checkin', element: <Checkin /> },
+
+      // comuns (lobinhos/escoteiros/seniors)
       {
         path: 'meu',
         element: (
@@ -36,7 +43,7 @@ const router = createBrowserRouter([
         ),
       },
 
-      // admins
+      // admins (chefes + pioneiros)
       {
         path: 'grupo',
         element: (
@@ -71,6 +78,8 @@ const router = createBrowserRouter([
       },
     ],
   },
+
+  // fallback
   { path: '*', element: <Landing /> },
 ])
 
