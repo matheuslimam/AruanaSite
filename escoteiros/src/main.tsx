@@ -1,10 +1,7 @@
+// src/main.tsx
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import {
-  createBrowserRouter,
-  createHashRouter,
-  RouterProvider,
-} from 'react-router-dom'
+import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import './index.css'
 
 import Landing from './routes/Landing'
@@ -21,81 +18,77 @@ import Checkin from './routes/Checkin'
 import { SessionProvider } from './supabase'
 import { RequireRole, RequireNoGroup, IndexRedirect } from './guards'
 
-// ------------------ Rotas (compartilhadas) ------------------
-const routes = [
-  { path: '/', element: <Landing /> },
-  { path: '/auth', element: <AuthPage /> },
+// 👇 pega o base do Vite (configure no vite.config.ts)
+const BASENAME = import.meta.env.BASE_URL || '/'
 
-  {
-    path: '/app',
-    element: <AppLayout />, // exige usuário logado
-    children: [
-      { index: true, element: <IndexRedirect /> }, // /app -> redireciona conforme role/grupo
+const router = createBrowserRouter(
+  [
+    { path: '/', element: <Landing /> },
+    { path: '/auth', element: <AuthPage /> },
 
-      // onboarding (somente quem ainda NÃO tem group_id)
-      { path: 'onboarding', element: <RequireNoGroup><Onboarding /></RequireNoGroup> },
+    {
+      path: '/app',
+      element: <AppLayout />, // exige usuário logado
+      children: [
+        { index: true, element: <IndexRedirect /> }, // /app -> redireciona conforme role/grupo
 
-      // rota aberta a QUALQUER usuário autenticado (para ler QR e confirmar presença)
-      { path: 'checkin', element: <Checkin /> },
+        // onboarding (somente quem ainda NÃO tem group_id)
+        { path: 'onboarding', element: <RequireNoGroup><Onboarding /></RequireNoGroup> },
 
-      // comuns (lobinhos/escoteiros/seniors)
-      {
-        path: 'meu',
-        element: (
-          <RequireRole allow={['lobinhos','escoteiros','seniors']} to="/app/atividades">
-            <MeuPainel />
-          </RequireRole>
-        ),
-      },
+        // rota aberta a QUALQUER usuário autenticado (para ler QR e confirmar presença)
+        { path: 'checkin', element: <Checkin /> },
 
-      // admins (chefes + pioneiros)
-      {
-        path: 'grupo',
-        element: (
-          <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
-            <Grupo />
-          </RequireRole>
-        ),
-      },
-      {
-        path: 'atividades',
-        element: (
-          <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
-            <Atividades />
-          </RequireRole>
-        ),
-      },
-      {
-        path: 'membros',
-        element: (
-          <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
-            <Membros />
-          </RequireRole>
-        ),
-      },
-      {
-        path: 'patrulhas',
-        element: (
-          <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
-            <Patrulhas />
-          </RequireRole>
-        ),
-      },
-    ],
-  },
+        // comuns (lobinhos/escoteiros/seniors)
+        {
+          path: 'meu',
+          element: (
+            <RequireRole allow={['lobinhos','escoteiros','seniors']} to="/app/atividades">
+              <MeuPainel />
+            </RequireRole>
+          ),
+        },
 
-  // fallback
-  { path: '*', element: <Landing /> },
-]
+        // admins (chefes + pioneiros)
+        {
+          path: 'grupo',
+          element: (
+            <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
+              <Grupo />
+            </RequireRole>
+          ),
+        },
+        {
+          path: 'atividades',
+          element: (
+            <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
+              <Atividades />
+            </RequireRole>
+          ),
+        },
+        {
+          path: 'membros',
+          element: (
+            <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
+              <Membros />
+            </RequireRole>
+          ),
+        },
+        {
+          path: 'patrulhas',
+          element: (
+            <RequireRole allow={['chefe','pioneiros']} to="/app/meu">
+              <Patrulhas />
+            </RequireRole>
+          ),
+        },
+      ],
+    },
 
-// ------------------ Escolha do Router ------------------
-const usingGhPages = import.meta.env.VITE_GH_PAGES === 'true'
-
-// No GH Pages usamos HashRouter para evitar problemas de 404.
-// Em produção “normal”, usamos BrowserRouter com basename do Vite.
-const router = usingGhPages
-  ? createHashRouter(routes)
-  : createBrowserRouter(routes, { basename: import.meta.env.BASE_URL })
+    // fallback
+    { path: '*', element: <Landing /> },
+  ],
+  { basename: BASENAME } // 👈 AQUI é o pulo do gato p/ GitHub Pages
+)
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
