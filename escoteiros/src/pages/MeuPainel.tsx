@@ -168,84 +168,104 @@ export default function MeuPainel() {
     present: attActivityIds.has(String(a.id)),
   }))
 
-  // ===== scan helpers =====
-  function handleDecoded(text: string){
-    // tenta URL completa
-    try {
-      const u = new URL(text)
-      if (u.pathname.endsWith('/app/checkin') && (u.searchParams.get('t') || u.searchParams.get('a'))) {
-        stopScanner().finally(()=> {
-          navigate(u.pathname + u.search, { replace: true })
-        })
-        return
-      }
-    } catch {/* not a URL */}
+// ===== scan helpers =====
+function parseCheckin(text: string): { t?: string; a?: string } | null {
+  // 1) tenta URL completa (com ou sem hash)
+  try {
+    const u = new URL(text)
+    const hash = u.hash.startsWith('#') ? u.hash.slice(1) : u.hash
 
-    // token simples
-    if (/^[A-Za-z0-9._~-]{8,}$/.test(text)) {
-      stopScanner().finally(()=> navigate(`/app/checkin?t=${encodeURIComponent(text)}`, { replace: true }))
-      return
-    }
-    // UUID de atividade
-    if (/^[0-9a-fA-F-]{36}$/.test(text)) {
-      stopScanner().finally(()=> navigate(`/app/checkin?a=${encodeURIComponent(text)}`, { replace: true }))
-      return
+    // params na query normal
+    let t = u.searchParams.get('t') || ''
+    let a = u.searchParams.get('a') || ''
+
+    // params depois do hash (ex.: #/app/checkin?t=...)
+    if (!t && !a && hash.includes('?')) {
+      const q = new URLSearchParams(hash.split('?')[1] || '')
+      t = q.get('t') || ''
+      a = q.get('a') || ''
     }
 
+    const pathOk =
+      u.pathname.endsWith('/app/checkin') ||
+      hash.startsWith('/app/checkin')
+
+    if (pathOk && (t || a)) {
+      return { t: t || undefined, a: a || undefined }
+    }
+  } catch {
+    /* not a URL, segue */
+  }
+
+  // 2) token simples
+  if (/^[A-Za-z0-9._~-]{8,}$/.test(text)) return { t: text }
+
+  // 3) UUID da atividade
+  if (/^[0-9a-fA-F-]{36}$/.test(text)) return { a: text }
+
+  return null
+}
+
+async function handleDecoded(text: string) {
+  const params = parseCheckin(text)
+  if (!params) {
     setQrErr('QR inválido. Cole o link ou peça um novo código.')
+    return
   }
+  const qs = new URLSearchParams(params as Record<string, string>).toString()
+  await stopScanner()
+  // navega SEM basename; HashRouter acrescenta o "#/" pra você
+  navigate(`/app/checkin?${qs}`, { replace: true })
+}
 
-  async function startScanner(){
-    setQrErr(null)
-    const id = `qr-reader-${Date.now()}`
-    setReaderId(id)
-    try{
-      // import dinâmico (instale: npm i html5-qrcode)
-      const mod: any = await import('html5-qrcode')
-      const Html5Qrcode = mod.Html5Qrcode
-      // aguarda o container aparecer
-      await new Promise(r => setTimeout(r, 0))
-      const scanner = new Html5Qrcode(id)
-      scannerRef.current = scanner
-      await scanner.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 260, height: 260 } },
-        (decodedText: string) => handleDecoded(decodedText),
-        () => {} // onError: ignora ruído
-      )
-    } catch (e:any){
-      setQrErr('Não consegui acessar a câmera. Dica: permita o uso da câmera ou cole o link abaixo.')
-      scannerRef.current = null
-    }
-  }
-
-  async function stopScanner(){
-    try{
-      await scannerRef.current?.stop()
-      await scannerRef.current?.clear()
-    } catch {}
+async function startScanner() {
+  setQrErr(null)
+  const id = `qr-reader-${Date.now()}`
+  setReaderId(id)
+  try {
+    const mod: any = await import('html5-qrcode')
+    const Html5Qrcode = mod.Html5Qrcode
+    await new Promise(r => setTimeout(r, 0)) // espera montar o container
+    const scanner = new Html5Qrcode(id)
+    scannerRef.current = scanner
+    await scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 260, height: 260 } },
+      (decodedText: string) => handleDecoded(decodedText),
+      () => {} // onError: ignora ruído
+    )
+  } catch {
+    setQrErr('Não consegui acessar a câmera. Dica: permita o uso da câmera ou cole o link abaixo.')
     scannerRef.current = null
   }
+}
 
-  function openQr(){
-    setQrOpen(true)
-    setReaderId('')
-    setManual('')
-    setQrErr(null)
-    // inicia após o modal montar
-    setTimeout(startScanner, 50)
-  }
+async function stopScanner() {
+  try {
+    await scannerRef.current?.stop()
+    await scannerRef.current?.clear()
+  } catch {}
+  scannerRef.current = null
+}
 
-  function closeQr(){
-    setQrOpen(false)
-    void stopScanner()
-  }
+function openQr() {
+  setQrOpen(true)
+  setReaderId('')
+  setManual('')
+  setQrErr(null)
+  setTimeout(startScanner, 50) // inicia após o modal montar
+}
 
-  function submitManual(){
-    const v = manual.trim()
-    if (!v) return
-    handleDecoded(v)
-  }
+function closeQr() {
+  setQrOpen(false)
+  void stopScanner()
+}
+
+function submitManual() {
+  const v = manual.trim()
+  if (!v) return
+  void handleDecoded(v)
+}
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
