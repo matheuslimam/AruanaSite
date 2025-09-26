@@ -191,11 +191,10 @@ export default function MeuPainel() {
     return null
   }
 
-
 async function ensurePresencePointsForActivity(activityId: string) {
   try {
     const { error } = await supabase.functions.invoke('ensure-presence-points', {
-      body: { activity_id: activityId, points: 1 },
+      body: { activity_id: activityId, points: 1 }
     });
     if (error) {
       const res = (error as any).context?.response;
@@ -218,16 +217,18 @@ async function ensurePresencePointsForActivity(activityId: string) {
 }
 
 
-async function handleDecoded(text: string) {
-  const params = parseCheckin(text);
-  if (!params) { setQrErr('QR inválido. Cole o link ou peça um novo código.'); return; }
 
-  if (params.a) await ensurePresencePointsForActivity(params.a); // << aqui é await
 
-  const qs = new URLSearchParams(params as Record<string, string>).toString();
-  await stopScanner();
-  navigate(`/app/checkin?${qs}`, { replace: true });
-}
+  async function handleDecoded(text: string) {
+    const params = parseCheckin(text)
+    if (!params) { setQrErr('QR inválido. Cole o link ou peça um novo código.'); return }
+
+    if (params.a) void ensurePresencePointsForActivity(params.a)
+
+    const qs = new URLSearchParams(params as Record<string, string>).toString()
+    await stopScanner()
+    navigate(`/app/checkin?${qs}`, { replace: true })
+  }
 
   async function startScanner() {
     setQrErr(null)
