@@ -191,30 +191,21 @@ export default function MeuPainel() {
     return null
   }
 
-  async function ensurePresencePointsForActivity(activityId: string) {
-    try {
-      if (!gid || !profile?.id) return
-      const { data: act, error: e1 } = await supabase
-        .from('activities').select('id,title,group_id')
-        .eq('id', activityId).single()
-      if (e1 || !act || act.group_id !== gid) return
+async function ensurePresencePointsForActivity(activityId: string) {
+  try {
+    if (!gid || !profile?.id) return;
 
-      const reason = `Presença em ${act.title}`
-      const { data: existing } = await supabase
-        .from('points')
-        .select('id')
-        .eq('activity_id', activityId)
-        .eq('member_id', profile.id)
-        .eq('reason', reason)
-        .limit(1)
-
-      if (existing && existing.length) return
-
-      await supabase.functions.invoke('award-points', {
-        body: { items: [{ member_id: profile.id, activity_id: activityId, points: 1, reason }] }
-      })
-    } catch {}
+    // idempotente; insere presença (se faltar) e 1 ponto de "Presença em {título}"
+    const { error } = await supabase.functions.invoke('ensure-presence-points', {
+      body: { activity_id: activityId, points: 1 },
+    });
+    // se der 4xx (ex.: grupo diferente), apenas ignoramos aqui — a presença já foi marcada pelo check-in
+    if (error) console.warn('[ensure-presence-points]', error);
+  } catch (e) {
+    console.warn('[ensure-presence-points] exception', e);
   }
+}
+
 
   async function handleDecoded(text: string) {
     const params = parseCheckin(text)
