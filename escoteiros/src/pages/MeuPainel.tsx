@@ -191,32 +191,43 @@ export default function MeuPainel() {
     return null
   }
 
+
 async function ensurePresencePointsForActivity(activityId: string) {
   try {
-    if (!activityId) return;
-    // chama sua Edge Function que valida grupo, marca presença e dá pontos
     const { error } = await supabase.functions.invoke('ensure-presence-points', {
       body: { activity_id: activityId, points: 1 },
     });
-    if (error) console.error('ensure-presence-points error:', error);
-    // opcional: tratar data?.created para feedback
+    if (error) {
+      const res = (error as any).context?.response;
+      if (res) {
+        const txt = await res.text();
+        try {
+          const j = JSON.parse(txt);
+          if (res.status === 409 && j?.error === 'profile_missing') {
+            alert('Seu perfil ainda não está configurado no grupo. Abra o app (ou peça para um Chefe) para concluir o cadastro antes do check-in com pontos.');
+            return;
+          }
+        } catch {}
+      }
+      console.error('[ensure-presence-points]', error);
+    }
+    // ok -> pontos garantidos (ou já existiam)
   } catch (e) {
-    console.error(e);
+    console.error('[ensure-presence-points]', e);
   }
 }
 
 
+async function handleDecoded(text: string) {
+  const params = parseCheckin(text);
+  if (!params) { setQrErr('QR inválido. Cole o link ou peça um novo código.'); return; }
 
-  async function handleDecoded(text: string) {
-    const params = parseCheckin(text)
-    if (!params) { setQrErr('QR inválido. Cole o link ou peça um novo código.'); return }
+  if (params.a) await ensurePresencePointsForActivity(params.a); // << aqui é await
 
-    if (params.a) void ensurePresencePointsForActivity(params.a)
-
-    const qs = new URLSearchParams(params as Record<string, string>).toString()
-    await stopScanner()
-    navigate(`/app/checkin?${qs}`, { replace: true })
-  }
+  const qs = new URLSearchParams(params as Record<string, string>).toString();
+  await stopScanner();
+  navigate(`/app/checkin?${qs}`, { replace: true });
+}
 
   async function startScanner() {
     setQrErr(null)
