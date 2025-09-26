@@ -148,7 +148,7 @@ export default function MeuPainel() {
     [myPresenceCount, totalPastActivities]
   )
   const absences = Math.max(0, totalPastActivities - myPresenceCount)
-  const attActivityIds = useMemo(() => new Set(attPast.map(a => String(a.activity_id))), [attPast])
+  //const attActivityIds = useMemo(() => new Set(attPast.map(a => String(a.activity_id))), [attPast])
 
   const myBoardCat = useMemo(() => {
     const pid = profile?.patrol_id
