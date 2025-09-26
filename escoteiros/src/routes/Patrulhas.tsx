@@ -93,6 +93,50 @@ function Modal({ open, onClose, title, children }:{
   )
 }
 
+/* ====== Stepper numérico com suporte a negativo (bom no celular) ====== */
+function NumberStepper({
+  value,
+  onChange,
+  step = 1,
+  min = -999999,
+  max =  999999,
+  className = ''
+}: {
+  value: number
+  onChange: (v:number)=>void
+  step?: number
+  min?: number
+  max?: number
+  className?: string
+}) {
+  const clamp = (v:number)=> Math.max(min, Math.min(max, v))
+  const dec = ()=> onChange(clamp((value || 0) - step))
+  const inc = ()=> onChange(clamp((value || 0) + step))
+  const flip = ()=> onChange(clamp(-(value || 0)))
+
+  return (
+    <div className={`inline-flex items-stretch rounded-lg border overflow-hidden ${className}`}>
+      <button type="button" onClick={dec} className="px-3 py-2 text-lg leading-none bg-white hover:bg-gray-50" aria-label="Diminuir">−</button>
+      <input
+        type="text"            // permite digitar "-" no iOS/Android
+        inputMode="numeric"    // ainda mostra teclado numérico
+        pattern="-?[0-9]*"
+        className="w-24 text-center px-2 py-2 bg-white"
+        value={String(value ?? 0)}
+        onChange={(e)=>{
+          // aceita vazio ou apenas "-" como 0 visualmente
+          const raw = e.target.value.replace(/[^\d-]/g,'')
+          if (raw === '' || raw === '-') { onChange(0); return }
+          const n = parseInt(raw, 10)
+          if (!Number.isNaN(n)) onChange(clamp(n))
+        }}
+      />
+      <button type="button" onClick={inc} className="px-3 py-2 text-lg leading-none bg-white hover:bg-gray-50" aria-label="Aumentar">+</button>
+      <button type="button" onClick={flip} className="px-2 py-2 text-sm leading-none bg-gray-50 border-l" title="Inverter sinal">±</button>
+    </div>
+  )
+}
+
 /* ====== componente do “degrau” do pódio ====== */
 function PodiumStep({
  // rank,
@@ -117,10 +161,7 @@ function PodiumStep({
       <div className="mt-2 text-sm font-semibold text-slate-800 text-center">{row.name}</div>
       <div className="mt-0.5"><Badge cat={cat} /></div>
 
-      <div
-        className={`mt-3 w-full rounded-t-xl border ${t.accentBorder} bg-gradient-to-t ${t.podiumGrad} relative flex items-end justify-center`}
-        style={{ height }}
-      >
+      <div className={`mt-3 w-full rounded-t-xl border ${t.accentBorder} bg-gradient-to-t ${t.podiumGrad} relative flex items-end justify-center`} style={{ height }}>
         <div className="absolute -top-3 text-xs px-2 py-0.5 rounded-full border bg-white shadow-sm">
           {label}
         </div>
@@ -295,7 +336,6 @@ export default function Patrulhas(){
         cacheBust: true,
         backgroundColor: '#ffffff',
         pixelRatio: 3,
-        // Oculta QUALQUER nó marcado com data-noexport="true"
         filter: (el: any) => !(el?.dataset?.noexport === 'true'),
       })
       const link = document.createElement('a')
@@ -307,13 +347,12 @@ export default function Patrulhas(){
     }
   }
 
-  // 👇 técnica robusta: clona o pódio, exibe “atrás” da UI, exporta e remove
   async function exportPodium(cat: PatrolCategory){
     const src = podiumRefs.current[cat]
     if (!src) return alert('Nada para exportar.')
 
     const clone = src.cloneNode(true) as HTMLElement
-    clone.classList.remove('hidden') // revela o clone
+    clone.classList.remove('hidden')
     Object.assign(clone.style, {
       position: 'fixed',
       left: '0px',
@@ -326,16 +365,10 @@ export default function Patrulhas(){
     } as CSSStyleDeclaration)
 
     document.body.appendChild(clone)
-
-    // espera 2 frames p/ layout ficar estável
     await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
 
     try {
-      const dataUrl = await toPng(clone, {
-        cacheBust: true,
-        backgroundColor: '#ffffff',
-        pixelRatio: 3,
-      })
+      const dataUrl = await toPng(clone, { cacheBust: true, backgroundColor: '#ffffff', pixelRatio: 3 })
       const link = document.createElement('a')
       link.download = `podio-${cat}.png`
       link.href = dataUrl
@@ -466,12 +499,11 @@ export default function Patrulhas(){
                 </div>
               </div>
 
-              {/* 🏆 PÓDIO — base escondida (usamos um CLONE visível na exportação) */}
+              {/* 🏆 PÓDIO — base escondida */}
               <div
                 ref={el => { podiumRefs.current[cat] = el }}
                 className="hidden w-[1100px] bg-white rounded-2xl border overflow-hidden"
               >
-                {/* header do pódio */}
                 <div className={`px-6 py-5 bg-gradient-to-r ${t.headerGrad} border-b ${t.accentBorder}`}>
                   <div className="flex items-center justify-between">
                     <div>
@@ -508,7 +540,7 @@ export default function Patrulhas(){
 
       {/* Dar pontos direto */}
       <div className="border rounded-xl p-4 space-y-3">
-        <div className="font-medium">Dar pontos para uma patrulha (opcional)</div>
+        <div className="font-medium">Dar ou tirar pontos de uma patrulha</div>
         <div className="flex flex-col sm:flex-row sm:flex-wrap gap-2 items-stretch sm:items-end">
           <select className="border rounded p-2" value={awardId} onChange={e=>setAwardId(e.target.value)}>
             <option value="">— Patrulha —</option>
@@ -518,13 +550,15 @@ export default function Patrulhas(){
               </option>
             ))}
           </select>
-          <input
-            type="number"
-            className="w-full sm:w-28 border rounded p-2"
-            placeholder="Pontos"
-            value={Number.isNaN(awardPoints) ? 0 : awardPoints}
-            onChange={e=>setAwardPoints(parseInt(e.target.value || '0', 10))}
-          />
+
+          {/* >>> Stepper com negativo */}
+          <div className="flex items-end gap-2">
+            <div>
+              <div className="text-xs text-slate-600 mb-1">Pontos (+ / −)</div>
+              <NumberStepper value={awardPoints} onChange={setAwardPoints} />
+            </div>
+          </div>
+
           <input
             className="flex-1 min-w-[200px] border rounded p-2"
             placeholder="Motivo"
@@ -536,9 +570,10 @@ export default function Patrulhas(){
             disabled={awarding}
             className={`px-3 py-2 rounded text-white ${awarding ? 'bg-gray-600' : 'bg-black'}`}
           >
-            {awarding ? <span className="inline-flex items-center gap-2"><Spinner/> Atribuindo…</span> : 'Atribuir'}
+            {awarding ? <span className="inline-flex items-center gap-2"><Spinner/> Aplicando…</span> : 'Aplicar'}
           </button>
         </div>
+        <div className="text-xs text-slate-500">Dica: use os botões − / + ou “±” para inverter o sinal no celular.</div>
       </div>
 
       {/* Modal de edição */}
@@ -568,15 +603,10 @@ export default function Patrulhas(){
           </div>
 
           <div className="border rounded p-3 space-y-2">
-            <div className="font-medium">Ajuste de pontos (opcional)</div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-              <input
-                type="number"
-                className="border rounded p-2"
-                placeholder="+/- pontos"
-                value={Number.isNaN(deltaPoints) ? 0 : deltaPoints}
-                onChange={e=>setDeltaPoints(parseInt(e.target.value || '0', 10))}
-              />
+            <div className="font-medium">Ajuste de pontos</div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+              {/* >>> Stepper com negativo no modal */}
+              <NumberStepper value={deltaPoints} onChange={setDeltaPoints} />
               <input
                 className="sm:col-span-2 border rounded p-2"
                 placeholder="Motivo"
@@ -584,7 +614,7 @@ export default function Patrulhas(){
                 onChange={e=>setDeltaReason(e.target.value)}
               />
             </div>
-            <div className="text-xs text-gray-500">Dica: use valores negativos para remover pontos (ex.: -5).</div>
+            <div className="text-xs text-gray-500">Use valores negativos para remover pontos (ex.: toque em “±” para inverter).</div>
           </div>
 
           <div className="flex items-center justify-end gap-2">
