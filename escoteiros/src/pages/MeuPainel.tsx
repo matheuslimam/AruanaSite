@@ -193,18 +193,18 @@ export default function MeuPainel() {
 
 async function ensurePresencePointsForActivity(activityId: string) {
   try {
-    if (!gid || !profile?.id) return;
-
-    // idempotente; insere presença (se faltar) e 1 ponto de "Presença em {título}"
+    if (!activityId) return;
+    // chama sua Edge Function que valida grupo, marca presença e dá pontos
     const { error } = await supabase.functions.invoke('ensure-presence-points', {
       body: { activity_id: activityId, points: 1 },
     });
-    // se der 4xx (ex.: grupo diferente), apenas ignoramos aqui — a presença já foi marcada pelo check-in
-    if (error) console.warn('[ensure-presence-points]', error);
+    if (error) console.error('ensure-presence-points error:', error);
+    // opcional: tratar data?.created para feedback
   } catch (e) {
-    console.warn('[ensure-presence-points] exception', e);
+    console.error(e);
   }
 }
+
 
 
   async function handleDecoded(text: string) {
