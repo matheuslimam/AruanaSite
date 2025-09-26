@@ -10,7 +10,6 @@ export default function Nav() {
   const location = useLocation()
   const [open, setOpen] = useState(false)
 
-  // fecha o menu sempre que a rota mudar
   useEffect(()=>{ setOpen(false) }, [location])
 
   const handleSignOut = useCallback(async () => {
@@ -49,12 +48,16 @@ export default function Nav() {
       <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
         {HomeLink}
 
-        {/* DESKTOP (>= md): menu inline */}
+        {/* DESKTOP */}
         <div className="hidden md:flex items-center gap-2">
           {session ? (
             <>
+              {/* Calendário para todos os logados */}
+              <NavLink to="/app/calendario" end className={navCls}>Calendário</NavLink>
+
               {isCommon && <NavLink to="/app/meu" end className={navCls}>Meu painel</NavLink>}
               {isAdminView && <AdminLinks />}
+
               <button
                 type="button"
                 onClick={handleSignOut}
@@ -69,7 +72,7 @@ export default function Nav() {
           )}
         </div>
 
-        {/* MOBILE (< md): botão hambúrguer */}
+        {/* MOBILE button */}
         <button
           type="button"
           className="md:hidden inline-flex items-center justify-center rounded-md p-2 border text-gray-700 hover:bg-gray-50"
@@ -77,27 +80,21 @@ export default function Nav() {
           aria-expanded={open}
           onClick={()=>setOpen(true)}
         >
-          {/* ícone hambúrguer */}
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" className="pointer-events-none">
             <path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
           </svg>
         </button>
       </div>
 
-      {/* OVERLAY + DRAWER MOBILE */}
-      {/* overlay */}
+      {/* OVERLAY */}
       <div
         className={`md:hidden fixed inset-0 bg-black/30 transition-opacity ${open ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         onClick={()=>setOpen(false)}
         aria-hidden="true"
       />
-      {/* drawer */}
+      {/* DRAWER */}
       <div
-        className={`
-          md:hidden fixed inset-y-0 right-0 w-80 max-w-[85vw] bg-white shadow-xl transition-transform
-          ${open ? 'translate-x-0' : 'translate-x-full'}
-          flex flex-col
-        `}
+        className={`md:hidden fixed inset-y-0 right-0 w-80 max-w-[85vw] bg-white shadow-xl transition-transform ${open ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}
         role="dialog"
         aria-label="Menu"
       >
@@ -109,7 +106,6 @@ export default function Nav() {
             onClick={()=>setOpen(false)}
             aria-label="Fechar menu"
           >
-            {/* ícone X */}
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
               <path d="M6 6l12 12M6 18L18 6" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
             </svg>
@@ -119,6 +115,9 @@ export default function Nav() {
         <div className="p-3 flex-1 overflow-auto">
           {session ? (
             <div className="flex flex-col gap-1">
+              {/* Calendário para todos */}
+              <NavLink to="/app/calendario" end className={navCls}>Calendário</NavLink>
+
               {isCommon && (
                 <NavLink to="/app/meu" end className={navCls}>
                   Meu painel
@@ -148,7 +147,6 @@ export default function Nav() {
           )}
         </div>
 
-        {/* rodapé do drawer (opcional) */}
         {session && (
           <div className="border-t p-3 text-xs text-gray-500">
             Logado como <span className="font-medium">{profile?.display_name || 'Usuário'}</span>

@@ -14,11 +14,11 @@ import MeuPainel from './pages/MeuPainel'
 import Onboarding from './routes/Onboarding'
 import Grupo from './routes/Grupo'
 import Checkin from './routes/Checkin'
+import Calendario from './routes/Calendario' // 👈 NOVO
 
 import { SessionProvider } from './supabase'
 import { RequireRole, RequireNoGroup, IndexRedirect } from './guards'
 
-// 👇 pega o base do Vite (configure no vite.config.ts)
 const BASENAME = import.meta.env.BASE_URL || '/'
 
 const router = createBrowserRouter(
@@ -28,17 +28,19 @@ const router = createBrowserRouter(
 
     {
       path: '/app',
-      element: <AppLayout />, // exige usuário logado
+      element: <AppLayout />,
       children: [
-        { index: true, element: <IndexRedirect /> }, // /app -> redireciona conforme role/grupo
+        { index: true, element: <IndexRedirect /> },
 
-        // onboarding (somente quem ainda NÃO tem group_id)
         { path: 'onboarding', element: <RequireNoGroup><Onboarding /></RequireNoGroup> },
 
-        // rota aberta a QUALQUER usuário autenticado (para ler QR e confirmar presença)
+        // aberto a usuário autenticado (dentro de /app)
         { path: 'checkin', element: <Checkin /> },
 
-        // comuns (lobinhos/escoteiros/seniors)
+        // Calendário: todos os papéis autenticados
+        { path: 'calendario', element: <Calendario /> },
+
+        // comuns
         {
           path: 'meu',
           element: (
@@ -48,7 +50,7 @@ const router = createBrowserRouter(
           ),
         },
 
-        // admins (chefes + pioneiros)
+        // admins
         {
           path: 'grupo',
           element: (
@@ -84,10 +86,9 @@ const router = createBrowserRouter(
       ],
     },
 
-    // fallback
     { path: '*', element: <Landing /> },
   ],
-  { basename: BASENAME } // 👈 AQUI é o pulo do gato p/ GitHub Pages
+  { basename: BASENAME }
 )
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

@@ -2,9 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../supabase'
 import { useMyProfile } from '../guards'
-import Calendar, { type CalendarEvent } from '../components/Calendar'
 
-type AttRow = { activity_id: string; present: boolean; created_at: string | null }
+type AttRow = { activity_id: string; present: boolean; created_at: string | null; date?: string }
 type ActRow = { id: string; title: string; date: string }
 type BoardItem = { id: string; name: string; category: 'lobinhos'|'escoteiros'|'seniors'; total_points: number }
 
@@ -28,6 +27,7 @@ export default function MeuPainel() {
 
   // métricas de atividades/presenças
   const [totalActivities, setTotalActivities] = useState(0)
+  const [totalPastActivities, setTotalPastActivities] = useState(0) // só passadas/hoje
   const [attendances, setAttendances] = useState<AttRow[]>([])
   const [recentActivities, setRecentActivities] = useState<ActRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -37,11 +37,8 @@ export default function MeuPainel() {
   const [myPatrolPoints, setMyPatrolPoints] = useState<number | null>(null)
   const [myRank, setMyRank] = useState<number | null>(null)
 
-  // próximas + calendário
-  const [upcoming, setUpcoming] = useState<ActRow[]>([])
-  const [month, setMonth] = useState<Date>(new Date())
-  const [monthActs, setMonthActs] = useState<ActRow[]>([])
-  const [viewMode, setViewMode] = useState<'list'|'calendar'>('list')
+  // apenas a PRÓXIMA atividade
+  const [nextActivity, setNextActivity] = useState<ActRow | null>(null)
 
   // ===== Scanner QR =====
   const [qrOpen, setQrOpen] = useState(false)
@@ -55,22 +52,31 @@ export default function MeuPainel() {
     let alive = true
     ;(async () => {
       setLoading(true)
-      const { s: monthStart, e: monthEnd } = monthEdges(month)
+      monthEdges(new Date())
       const today = todayYMD()
 
+      // contagem total e total passado (para faltas e %)
       const totalReq = supabase
         .from('activities')
         .select('*', { head: true, count: 'exact' })
         .eq('group_id', gid)
 
+      const totalPastReq = supabase
+        .from('activities')
+        .select('*', { head: true, count: 'exact' })
+        .eq('group_id', gid)
+        .lte('date', today)
+
+      // presenças do usuário (trazendo a data da atividade para filtrar passadas)
       const attReq = supabase
         .from('attendance')
-        .select('activity_id,present,created_at, activities!inner(group_id)')
+        .select('activity_id,present,created_at, activities!inner(date,group_id)')
         .eq('member_id', profile.id)
         .eq('present', true)
         .eq('activities.group_id', gid)
         .order('created_at', { ascending: false })
 
+      // últimas atividades para resolver títulos na lista de “minhas presenças recentes”
       const actsReq = supabase
         .from('activities')
         .select('id,title,date')
@@ -78,44 +84,39 @@ export default function MeuPainel() {
         .order('date', { ascending: false })
         .limit(20)
 
-      const upcomingReq = supabase
+      // somente a PRÓXIMA
+      const nextReq = supabase
         .from('activities')
         .select('id,title,date')
         .eq('group_id', gid)
         .gte('date', today)
         .order('date', { ascending: true })
-        .limit(10)
+        .limit(1)
 
-      const monthReq = supabase
-        .from('activities')
-        .select('id,title,date')
-        .eq('group_id', gid)
-        .gte('date', monthStart)
-        .lte('date', monthEnd)
-        .order('date', { ascending: true })
-
+      // ranking
       const boardReq = supabase
         .from('patrol_points_view')
         .select('id,name,category,total_points')
         .eq('group_id', gid)
         .order('total_points', { ascending: false })
 
-      const [totalRes, attRes, actsRes, upcRes, mRes, boardRes] =
-        await Promise.all([totalReq, attReq, actsReq, upcomingReq, monthReq, boardReq])
+      const [totalRes, totalPastRes, attRes, actsRes, nextRes, boardRes] =
+        await Promise.all([totalReq, totalPastReq, attReq, actsReq, nextReq, boardReq])
       if (!alive) return
 
       const rawAtts = ((attRes.data as any[]) ?? []).map(a => ({
         activity_id: a.activity_id,
         present: a.present,
         created_at: a.created_at,
+        date: a.activities?.date as string | undefined,
       })) as AttRow[]
       const dedup = Array.from(new Map(rawAtts.map(a => [String(a.activity_id), a])).values())
 
       setTotalActivities(totalRes.count || 0)
+      setTotalPastActivities(totalPastRes.count || 0)
       setAttendances(dedup)
       setRecentActivities((actsRes.data as ActRow[]) ?? [])
-      setUpcoming((upcRes.data as ActRow[]) ?? [])
-      setMonthActs((mRes.data as ActRow[]) ?? [])
+      setNextActivity(((nextRes.data as ActRow[]) ?? [])[0] ?? null)
 
       const rows = (boardRes.data as BoardItem[]) ?? []
       setBoard(rows)
@@ -136,16 +137,18 @@ export default function MeuPainel() {
       setLoading(false)
     })()
     return () => { alive = false }
-  }, [profile?.id, profile?.patrol_id, gid, month])
+  }, [profile?.id, profile?.patrol_id, gid])
 
   // ===== derivados =====
-  const myPresenceCount = attendances.length
+  const today = todayYMD()
+  const attPast = useMemo(() => attendances.filter(a => (a.date ?? '') <= today), [attendances, today])
+  const myPresenceCount = attPast.length
   const pct = useMemo(
-    () => (totalActivities > 0 ? Math.round((myPresenceCount / totalActivities) * 100) : 0),
-    [myPresenceCount, totalActivities]
+    () => (totalPastActivities > 0 ? Math.round((myPresenceCount / totalPastActivities) * 100) : 0),
+    [myPresenceCount, totalPastActivities]
   )
-  const absences = Math.max(0, totalActivities - myPresenceCount)
-  const attActivityIds = useMemo(() => new Set(attendances.map(a => String(a.activity_id))), [attendances])
+  const absences = Math.max(0, totalPastActivities - myPresenceCount)
+  const attActivityIds = useMemo(() => new Set(attPast.map(a => String(a.activity_id))), [attPast])
 
   const myBoardCat = useMemo(() => {
     const pid = profile?.patrol_id
@@ -160,18 +163,8 @@ export default function MeuPainel() {
 
   if (!profile) return null
 
-  // eventos do calendário (marca verde se já há presença)
-  const calEvents: CalendarEvent[] = monthActs.map(a => ({
-    id: a.id,
-    date: a.date,
-    title: a.title,
-    present: attActivityIds.has(String(a.id)),
-  }))
-
   /* ============ QR helpers ============ */
 
-  // tenta extrair params de /app/checkin tanto em URL normal quanto em hash (#/app/checkin?...),
-  // além de aceitar somente token ou apenas UUID.
   function parseCheckin(text: string): { t?: string; a?: string } | null {
     try {
       const u = new URL(text)
@@ -198,10 +191,6 @@ export default function MeuPainel() {
     return null
   }
 
-  // fallback seguro: garante os pontos de presença (1 ponto) apenas quando:
-  //  - há `a=` no QR
-  //  - a atividade é do mesmo grupo do usuário
-  //  - ainda NÃO existe lançamento "Presença em <título>"
   async function ensurePresencePointsForActivity(activityId: string) {
     try {
       if (!gid || !profile?.id) return
@@ -219,23 +208,18 @@ export default function MeuPainel() {
         .eq('reason', reason)
         .limit(1)
 
-      if (existing && existing.length) return // já tem ponto
+      if (existing && existing.length) return
 
-      // 1 ponto base por presença (admin pode reprocessar depois, se usar outro base)
       await supabase.functions.invoke('award-points', {
         body: { items: [{ member_id: profile.id, activity_id: activityId, points: 1, reason }] }
       })
-    } catch { /* silencioso */ }
+    } catch {}
   }
 
   async function handleDecoded(text: string) {
     const params = parseCheckin(text)
-    if (!params) {
-      setQrErr('QR inválido. Cole o link ou peça um novo código.')
-      return
-    }
+    if (!params) { setQrErr('QR inválido. Cole o link ou peça um novo código.'); return }
 
-    // fallback de pontos se tivermos o ID direto da atividade
     if (params.a) void ensurePresencePointsForActivity(params.a)
 
     const qs = new URLSearchParams(params as Record<string, string>).toString()
@@ -250,54 +234,34 @@ export default function MeuPainel() {
     try {
       const mod: any = await import('html5-qrcode')
       const Html5Qrcode = mod.Html5Qrcode
-      await new Promise(r => setTimeout(r, 0)) // espera montar o container
+      await new Promise(r => setTimeout(r, 0))
       const scanner = new Html5Qrcode(id)
       scannerRef.current = scanner
       await scanner.start(
         { facingMode: 'environment' },
         { fps: 10, qrbox: { width: 260, height: 260 } },
         (decodedText: string) => handleDecoded(decodedText),
-        () => {} // onError: ignora ruído
+        () => {}
       )
     } catch {
       setQrErr('Não consegui acessar a câmera. Dica: permita o uso da câmera ou cole o link abaixo.')
       scannerRef.current = null
     }
   }
-
   async function stopScanner() {
-    try {
-      await scannerRef.current?.stop()
-      await scannerRef.current?.clear()
-    } catch {}
+    try { await scannerRef.current?.stop(); await scannerRef.current?.clear() } catch {}
     scannerRef.current = null
   }
-
-  function openQr() {
-    setQrOpen(true)
-    setReaderId('')
-    setManual('')
-    setQrErr(null)
-    setTimeout(startScanner, 50) // inicia após o modal montar
-  }
-
-  function closeQr() {
-    setQrOpen(false)
-    void stopScanner()
-  }
-
-  function submitManual() {
-    const v = manual.trim()
-    if (!v) return
-    void handleDecoded(v)
-  }
+  function openQr() { setQrOpen(true); setReaderId(''); setManual(''); setQrErr(null); setTimeout(startScanner, 50) }
+  function closeQr() { setQrOpen(false); void stopScanner() }
+  function submitManual() { const v = manual.trim(); if (!v) return; void handleDecoded(v) }
 
   /* ===================== RENDER ===================== */
 
   return (
     <div className="max-w-6xl mx-auto space-y-8 pb-12">
 
-      {/* HERO (responsivo) */}
+      {/* HERO */}
       <section className="rounded-3xl border border-zinc-200 bg-gradient-to-br from-white via-zinc-50 to-emerald-50 text-zinc-900">
         <div className="grid gap-4 p-4 sm:gap-6 sm:p-6 lg:grid-cols-[1fr_auto] items-center">
           <div className="flex items-center gap-3 sm:gap-5">
@@ -321,7 +285,7 @@ export default function MeuPainel() {
             <div className="hidden sm:block"><RingLight percent={pct} size={108} stroke={12} /></div>
             <div className="text-sm/5 text-zinc-700">
               <div><b className="text-zinc-900">{myPresenceCount}</b> presenças</div>
-              <div><b className="text-zinc-900">{totalActivities}</b> atividades</div>
+              <div><b className="text-zinc-900">{totalPastActivities}</b> atividades (até hoje)</div>
             </div>
           </div>
         </div>
@@ -329,76 +293,45 @@ export default function MeuPainel() {
 
       {/* KPIs */}
       <section className="grid sm:grid-cols-3 gap-4">
-        <Stat label="Atividades" value={totalActivities} />
-        <Stat label="Presenças" value={myPresenceCount} />
-        <Stat label="Faltas" value={absences} />
+        <Stat label="Atividades (todas)" value={totalActivities} />
+        <Stat label="Presenças (até hoje)" value={myPresenceCount} />
+        <Stat label="Faltas (até hoje)" value={absences} />
       </section>
 
-      {/* Agenda (responsiva) */}
+      {/* Agenda — APENAS A PRÓXIMA */}
       <section className="space-y-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="font-semibold text-xl sm:text-base">Agenda</h2>
 
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-            <button
-              onClick={openQr}
-              className="w-full sm:w-auto px-3 py-2 sm:py-1.5 rounded border text-sm bg-white hover:bg-gray-50"
-              title="Ler QR de check-in"
-            >
-              Check-in por QR
-            </button>
-
-            <div className="grid grid-cols-2 w-full sm:w-auto rounded-lg overflow-hidden border">
-              <button
-                className={`px-3 py-2 sm:py-1 text-sm ${viewMode==='list'?'bg-black text-white':'bg-white'}`}
-                onClick={()=>setViewMode('list')}
-              >
-                Próximas
-              </button>
-              <button
-                className={`px-3 py-2 sm:py-1 text-sm ${viewMode==='calendar'?'bg-black text-white':'bg-white'}`}
-                onClick={()=>setViewMode('calendar')}
-              >
-                Calendário
-              </button>
-            </div>
-          </div>
+          <button
+            onClick={openQr}
+            className="w-full sm:w-auto px-3 py-2 sm:py-1.5 rounded border text-sm bg-white hover:bg-gray-50"
+            title="Ler QR de check-in"
+          >
+            Check-in por QR
+          </button>
         </div>
 
-        {viewMode==='list' ? (
-          <div className="rounded-2xl border bg-white">
-            {loading ? <Empty>Carregando…</Empty> : upcoming.length === 0 ? (
-              <Empty>Nenhuma atividade futura.</Empty>
-            ) : (
-              <ul className="divide-y">
-                {upcoming.map(a => {
-                  const present = attActivityIds.has(String(a.id))
-                  return (
-                    <li key={a.id} className="p-3 sm:p-4">
-                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-2xl border bg-white px-3 py-3">
-                        <div className="min-w-0">
-                          <div className="font-medium truncate">{a.title}</div>
-                          <div className="text-xs text-zinc-600">{new Date(a.date).toLocaleDateString()}</div>
-                        </div>
-                        <span className={`inline-flex items-center justify-center gap-2 text-sm px-2 py-1 rounded-full border self-start sm:self-auto ${present
-                          ? 'bg-emerald-600/10 text-emerald-700 border-emerald-600/30'
-                          : 'bg-zinc-100 text-zinc-700 border-zinc-300'}`}>
-                          {present ? '✔ Presente' : '— Aguardando'}
-                        </span>
-                      </div>
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-          </div>
-        ) : (
-          <Calendar
-            events={calEvents}
-            month={month}
-            onMonthChange={setMonth}
-          />
-        )}
+        <div className="rounded-2xl border bg-white">
+          {loading ? (
+            <Empty>Carregando…</Empty>
+          ) : !nextActivity ? (
+            <Empty>Sem próximas atividades.</Empty>
+          ) : (
+            <div className="p-3 sm:p-4">
+              <div className="rounded-2xl border bg-gradient-to-r from-amber-50 to-white px-3 py-3 flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-xs text-amber-700 font-semibold mb-0.5">Próxima atividade</div>
+                  <div className="font-medium truncate">{nextActivity.title}</div>
+                  <div className="text-xs text-zinc-600">{new Date(nextActivity.date).toLocaleDateString()}</div>
+                </div>
+                <span className="inline-flex items-center justify-center gap-2 text-sm px-2 py-1 rounded-full border bg-zinc-100 text-zinc-700 border-zinc-300 self-start sm:self-auto">
+                  — Aguardando
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
       </section>
 
       {/* Pontuação da Patrulha */}
@@ -457,15 +390,15 @@ export default function MeuPainel() {
       <section className="rounded-2xl border border-zinc-200 p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="font-semibold">Minhas presenças recentes</h2>
-          <span className="text-sm text-zinc-600">{attendances.length} no total</span>
+          <span className="text-sm text-zinc-600">{attPast.length} no total</span>
         </div>
         {loading ? (
           <Empty>Carregando…</Empty>
-        ) : attendances.length === 0 ? (
+        ) : attPast.length === 0 ? (
           <Empty>Você ainda não tem presenças registradas.</Empty>
         ) : (
           <ul className="space-y-2">
-            {attendances.slice(0, 8).map((a, i) => {
+            {attPast.slice(0, 8).map((a, i) => {
               const act = recentActivities.find(x => String(x.id) === String(a.activity_id))
               const key = `${a.activity_id}-${a.created_at ?? i}`
               return (

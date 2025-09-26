@@ -299,10 +299,11 @@ export default function Membros(){
             </select>
           </div>
 
-          <label className="flex items-center gap-2">
+          {/* <label className="flex items-center gap-2">
             <input type="checkbox" checked={sendInvite} onChange={e=>setSendInvite(e.target.checked)} />
             Enviar convite por e-mail/link
-          </label>
+          </label> */}
+
 
           <button
             onClick={addMember}
